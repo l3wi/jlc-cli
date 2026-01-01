@@ -1,5 +1,18 @@
 # @jlcpcb/mcp
 
+## 0.1.1
+
+### Patch Changes
+
+- **@jlcpcb/core:**
+  - Fix: Restrict built-in footprints to 2-pad passives only — prevents pin-flip issues on multi-pin components
+
+  **@jlcpcb/cli & @jlcpcb/mcp:**
+  - Updated dependencies
+
+- Updated dependencies []:
+  - @jlcpcb/core@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes
