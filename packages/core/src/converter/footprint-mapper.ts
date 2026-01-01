@@ -1,9 +1,11 @@
 /**
  * KiCad Standard Footprint Mapper
  * Maps common package names to KiCad built-in footprints for hybrid approach
+ *
+ * CONSERVATIVE APPROACH: Only uses KiCad built-ins for 2-pad unpolarized passives (R/C/L).
+ * All other components (ICs, transistors, diodes, etc.) generate custom footprints
+ * to avoid pin-flip issues from pad numbering mismatches.
  */
-
-import { getLibraryCategory, type LibraryCategory } from './category-router.js';
 
 export interface FootprintMapping {
   library: string;    // KiCad library name (e.g., "Resistor_SMD")
@@ -23,77 +25,16 @@ const SMD_SIZES: Record<string, { metric: string; imperialMm: string }> = {
   '2512': { metric: '6332', imperialMm: '6.3x3.2' },
 };
 
-// Prefix to library mapping for passives
+// Prefix to library mapping for 2-pad passives only
 const PASSIVE_LIBRARIES: Record<string, string> = {
   R: 'Resistor_SMD',
   C: 'Capacitor_SMD',
   L: 'Inductor_SMD',
 };
 
-// LED/Diode libraries
-const LED_LIBRARY = 'LED_SMD';
-const DIODE_LIBRARY = 'Diode_SMD';
-
-// Map library categories to footprint prefixes (for category-based fallback)
-const CATEGORY_TO_PREFIX: Partial<Record<LibraryCategory, string>> = {
-  Resistors: 'R',
-  Capacitors: 'C',
-  Inductors: 'L',
-  Diodes: 'D',
-};
-
-// SOIC package mappings
-const SOIC_MAPPINGS: Record<string, string> = {
-  'SOIC-8': 'SOIC-8_3.9x4.9mm_P1.27mm',
-  'SOP-8': 'SOIC-8_3.9x4.9mm_P1.27mm',
-  'SOIC-14': 'SOIC-14_3.9x8.7mm_P1.27mm',
-  'SOIC-16': 'SOIC-16_3.9x9.9mm_P1.27mm',
-  'SOIC-16W': 'SOIC-16W_7.5x10.3mm_P1.27mm',
-  'SOIC-20': 'SOIC-20W_7.5x12.8mm_P1.27mm',
-  'SOIC-24': 'SOIC-24W_7.5x15.4mm_P1.27mm',
-  'SOIC-28': 'SOIC-28W_7.5x17.9mm_P1.27mm',
-};
-
-// TSSOP package mappings
-const TSSOP_MAPPINGS: Record<string, string> = {
-  'TSSOP-8': 'TSSOP-8_3x3mm_P0.65mm',
-  'TSSOP-14': 'TSSOP-14_4.4x5mm_P0.65mm',
-  'TSSOP-16': 'TSSOP-16_4.4x5mm_P0.65mm',
-  'TSSOP-20': 'TSSOP-20_4.4x6.5mm_P0.65mm',
-  'TSSOP-24': 'TSSOP-24_4.4x7.8mm_P0.65mm',
-  'TSSOP-28': 'TSSOP-28_4.4x9.7mm_P0.65mm',
-};
-
-// SOT package mappings
-const SOT_MAPPINGS: Record<string, { library: string; footprint: string }> = {
-  'SOT-23': { library: 'Package_TO_SOT_SMD', footprint: 'SOT-23' },
-  'SOT-23-3': { library: 'Package_TO_SOT_SMD', footprint: 'SOT-23' },
-  'SOT-23-5': { library: 'Package_TO_SOT_SMD', footprint: 'SOT-23-5' },
-  'SOT-23-6': { library: 'Package_TO_SOT_SMD', footprint: 'SOT-23-6' },
-  'SOT-89': { library: 'Package_TO_SOT_SMD', footprint: 'SOT-89-3' },
-  'SOT-223': { library: 'Package_TO_SOT_SMD', footprint: 'SOT-223-3_TabPin2' },
-};
-
-// SOD diode package mappings
-const SOD_MAPPINGS: Record<string, { library: string; footprint: string }> = {
-  'SOD-123': { library: 'Diode_SMD', footprint: 'D_SOD-123' },
-  'SOD-123F': { library: 'Diode_SMD', footprint: 'D_SOD-123F' },
-  'SOD-323': { library: 'Diode_SMD', footprint: 'D_SOD-323' },
-  'SOD-523': { library: 'Diode_SMD', footprint: 'D_SOD-523' },
-  'SOD-923': { library: 'Diode_SMD', footprint: 'D_SOD-923' },
-  'SOD-128': { library: 'Diode_SMD', footprint: 'D_SOD-128' },
-  'SOD-80': { library: 'Diode_SMD', footprint: 'D_SOD-80' },
-};
-
-// SMA/SMB/SMC diode package mappings
-const DIODE_PACKAGE_MAPPINGS: Record<string, { library: string; footprint: string }> = {
-  'SMA': { library: 'Diode_SMD', footprint: 'D_SMA' },
-  'SMB': { library: 'Diode_SMD', footprint: 'D_SMB' },
-  'SMC': { library: 'Diode_SMD', footprint: 'D_SMC' },
-  'MELF': { library: 'Diode_SMD', footprint: 'D_MELF' },
-  'MINIMELF': { library: 'Diode_SMD', footprint: 'D_MiniMELF' },
-  'MICROMELF': { library: 'Diode_SMD', footprint: 'D_MicroMELF' },
-};
+// Expected pad count for each footprint (for validation)
+// All SMD passives have 2 pads
+const PASSIVE_PAD_COUNT = 2;
 
 /**
  * Normalize package name for matching
@@ -131,31 +72,31 @@ function extractSmdSize(packageName: string): string | null {
 
 /**
  * Map package name to KiCad standard footprint
- * Returns null if no standard mapping exists (will fall back to generated)
+ *
+ * CONSERVATIVE APPROACH: Only returns built-in mappings for 2-pad unpolarized passives.
+ * This avoids pin-flip issues that can occur when pad numbering differs between
+ * EasyEDA data and KiCad built-in footprints (e.g., SOT-23 transistors have
+ * different BCE/CBE/EBC pinouts across manufacturers).
+ *
+ * Returns null if no standard mapping exists (will fall back to generated footprint)
  */
 export function mapToKicadFootprint(
   packageName: string,
   componentPrefix: string,
-  category?: string,
-  description?: string
+  _category?: string,
+  _description?: string
 ): FootprintMapping | null {
-  const normalized = normalizePackageName(packageName);
-  let prefix = componentPrefix.toUpperCase();
+  const prefix = componentPrefix.toUpperCase();
 
-  // Category-based prefix fallback: if prefix doesn't match known mappings,
-  // try to detect the correct prefix from category/description
-  const isKnownPrefix = PASSIVE_LIBRARIES[prefix] || prefix === 'D' || prefix === 'LED';
-  if (!isKnownPrefix && (category || description)) {
-    const detectedCategory = getLibraryCategory(prefix, category, description);
-    const categoryPrefix = CATEGORY_TO_PREFIX[detectedCategory];
-    if (categoryPrefix) {
-      prefix = categoryPrefix;
-    }
+  // ONLY allow built-in footprints for 2-pad passives (R, C, L)
+  // These are safe because the pads are functionally interchangeable
+  if (!PASSIVE_LIBRARIES[prefix]) {
+    return null;
   }
 
-  // 1. Check SMD passive sizes (R, C, L)
+  // Check for standard SMD passive sizes
   const smdSize = extractSmdSize(packageName);
-  if (smdSize && PASSIVE_LIBRARIES[prefix]) {
+  if (smdSize) {
     const sizeInfo = SMD_SIZES[smdSize];
     const library = PASSIVE_LIBRARIES[prefix];
     // KiCad naming: R_0603_1608Metric, C_0603_1608Metric, L_0603_1608Metric
@@ -163,59 +104,26 @@ export function mapToKicadFootprint(
     return { library, footprint };
   }
 
-  // 2. Check LED SMD sizes (for LED prefix or components detected as LEDs)
-  if (smdSize && prefix === 'LED') {
-    const sizeInfo = SMD_SIZES[smdSize];
-    // KiCad naming: LED_0805_2012Metric
-    const footprint = `LED_${smdSize}_${sizeInfo.metric}Metric`;
-    return { library: LED_LIBRARY, footprint };
-  }
-
-  // 3. Check Diode SMD sizes (D prefix)
-  if (smdSize && prefix === 'D') {
-    const sizeInfo = SMD_SIZES[smdSize];
-    // KiCad naming: D_0805_2012Metric
-    const footprint = `D_${smdSize}_${sizeInfo.metric}Metric`;
-    return { library: DIODE_LIBRARY, footprint };
-  }
-
-  // 4. Check SOD diode packages
-  for (const [pattern, mapping] of Object.entries(SOD_MAPPINGS)) {
-    if (normalized.includes(pattern) || normalized.startsWith(pattern.replace(/-/g, ''))) {
-      return mapping;
-    }
-  }
-
-  // 5. Check SMA/SMB/SMC diode packages
-  for (const [pattern, mapping] of Object.entries(DIODE_PACKAGE_MAPPINGS)) {
-    // Match exact package type or with suffix (e.g., "SMA" in "SMA_L4.3...")
-    if (normalized === pattern || normalized.startsWith(pattern + '-') || normalized.startsWith(pattern + '_')) {
-      return mapping;
-    }
-  }
-
-  // 6. Check SOIC packages
-  for (const [pattern, footprint] of Object.entries(SOIC_MAPPINGS)) {
-    if (normalized.includes(pattern) || normalized.startsWith(pattern.replace(/-/g, ''))) {
-      return { library: 'Package_SO', footprint };
-    }
-  }
-
-  // 7. Check TSSOP packages
-  for (const [pattern, footprint] of Object.entries(TSSOP_MAPPINGS)) {
-    if (normalized.includes(pattern) || normalized.startsWith(pattern.replace(/-/g, ''))) {
-      return { library: 'Package_SO', footprint };
-    }
-  }
-
-  // 8. Check SOT packages
-  for (const [pattern, mapping] of Object.entries(SOT_MAPPINGS)) {
-    if (normalized.includes(pattern) || normalized === pattern.replace(/-/g, '')) {
-      return mapping;
-    }
-  }
-
   // No standard mapping found - will use generated footprint
+  return null;
+}
+
+/**
+ * Get expected pad count for a KiCad footprint mapping
+ * Used to validate that EasyEDA footprint matches before using built-in
+ *
+ * Returns null if pad count is unknown (caller should allow the mapping)
+ */
+export function getExpectedPadCount(mapping: FootprintMapping): number | null {
+  // All our passive footprints have 2 pads
+  if (
+    mapping.library === 'Resistor_SMD' ||
+    mapping.library === 'Capacitor_SMD' ||
+    mapping.library === 'Inductor_SMD'
+  ) {
+    return PASSIVE_PAD_COUNT;
+  }
+
   return null;
 }
 

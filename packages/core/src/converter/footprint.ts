@@ -19,7 +19,7 @@ import type {
 } from '../types/index.js';
 import { KICAD_FOOTPRINT_VERSION, KICAD_LAYERS } from '../constants/index.js';
 import { roundTo } from '../utils/index.js';
-import { mapToKicadFootprint, getKicadFootprintRef } from './footprint-mapper.js';
+import { mapToKicadFootprint, getKicadFootprintRef, getExpectedPadCount } from './footprint-mapper.js';
 
 // =============================================================================
 // Constants - EasyEDA to KiCad mappings from easyeda2kicad.py
@@ -342,8 +342,11 @@ export class FootprintConverter {
 
   /**
    * Get footprint using hybrid approach:
-   * - Use KiCad standard footprint if available (for common packages)
-   * - Generate custom footprint if no standard mapping exists
+   * - Use KiCad standard footprint if available (for common 2-pad passives)
+   * - Generate custom footprint for all other components
+   *
+   * CONSERVATIVE APPROACH: Only uses KiCad built-ins for R/C/L passives.
+   * This prevents pin-flip issues from pad numbering mismatches in ICs/transistors.
    */
   getFootprint(
     component: EasyEDAComponentData,
@@ -352,16 +355,28 @@ export class FootprintConverter {
     const { info, footprint } = component;
     const packageName = footprint.name;
     const prefix = info.prefix;
+    const actualPadCount = footprint.pads.length;
 
-    // Try to map to KiCad standard footprint
+    // Try to map to KiCad standard footprint (only works for R/C/L passives)
     const mapping = mapToKicadFootprint(packageName, prefix, info.category, info.description);
 
     if (mapping) {
-      return {
-        type: 'reference',
-        reference: getKicadFootprintRef(mapping),
-        name: mapping.footprint,
-      };
+      // Validate pad count matches expected before using built-in
+      const expectedPadCount = getExpectedPadCount(mapping);
+      if (expectedPadCount !== null && expectedPadCount !== actualPadCount) {
+        // Pad count mismatch - generate custom footprint instead
+        // This catches edge cases like multi-element resistor networks
+        console.warn(
+          `[footprint] Pad count mismatch for ${packageName}: expected ${expectedPadCount}, got ${actualPadCount}. Generating custom footprint.`
+        );
+      } else {
+        // Pad count matches (or unknown) - safe to use built-in
+        return {
+          type: 'reference',
+          reference: getKicadFootprintRef(mapping),
+          name: mapping.footprint,
+        };
+      }
     }
 
     // Generate custom footprint from EasyEDA data
