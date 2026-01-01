@@ -9,14 +9,11 @@ import { readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import type { IncomingMessage, ServerResponse } from 'http'
-import {
-  createLogger,
-  type EasyEDAComponentData,
-  type EasyEDACommunityComponent,
-  easyedaCommunityClient,
-  symbolConverter,
-  footprintConverter,
-} from '@jlcpcb/core'
+import { createLogger } from '../utils/logger.js'
+import type { EasyEDAComponentData, EasyEDACommunityComponent } from '../types/index.js'
+import { easyedaCommunityClient } from '../api/easyeda-community.js'
+import { symbolConverter } from '../converter/symbol.js'
+import { footprintConverter } from '../converter/footprint.js'
 
 const logger = createLogger('http-routes')
 
@@ -44,9 +41,11 @@ function getHtmlPage(): string {
       // Source: src/http/ looking for src/assets/
       join(__dirname, '../assets/search.html'),
       join(__dirname, '../assets/search-built.html'),
-      // From project root
+      // From project root (core package)
       join(process.cwd(), 'dist/assets/search.html'),
-      join(process.cwd(), 'packages/jlc-mcp/dist/assets/search.html'),
+      join(process.cwd(), 'packages/core/dist/assets/search.html'),
+      // When imported from other packages
+      join(__dirname, '../../dist/assets/search.html'),
     ]
 
     for (const path of possiblePaths) {
@@ -87,7 +86,8 @@ export async function handleRequest(
 
   // Route requests
   if (pathname === '/' || pathname === '/index.html') {
-    serveHtml(res)
+    const query = url.searchParams.get('q') || undefined
+    serveHtml(res, query)
   } else if (pathname === '/api/search') {
     await handleSearch(url, res)
   } else if (pathname.startsWith('/api/component/')) {
@@ -103,11 +103,19 @@ export async function handleRequest(
 }
 
 /**
- * Serve the HTML page
+ * Serve the HTML page with optional initial query injection
  */
-function serveHtml(res: ServerResponse): void {
+function serveHtml(res: ServerResponse, initialQuery?: string): void {
+  let html = getHtmlPage()
+
+  if (initialQuery) {
+    // Inject initial query via a script tag before </head>
+    const script = `<script>window.__INITIAL_QUERY__ = ${JSON.stringify(initialQuery)};</script>`
+    html = html.replace('</head>', `${script}</head>`)
+  }
+
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-  res.end(getHtmlPage())
+  res.end(html)
 }
 
 /**

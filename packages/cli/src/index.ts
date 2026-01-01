@@ -10,6 +10,7 @@ import { searchCommand } from './commands/search.js';
 import { infoCommand } from './commands/info.js';
 import { installCommand } from './commands/install.js';
 import { libraryCommand } from './commands/library.js';
+import { easyedaSearchCommand } from './commands/easyeda.js';
 
 const program = new Command();
 
@@ -64,6 +65,22 @@ program
   .action(async (options) => {
     await libraryCommand({
       json: options.json,
+    });
+  });
+
+// EasyEDA subcommand group
+const easyeda = program
+  .command('easyeda')
+  .description('EasyEDA community component browser');
+
+easyeda
+  .command('search <query...>')
+  .description('Open browser-based component search')
+  .option('-p, --port <number>', 'HTTP server port', '3847')
+  .action(async (queryParts: string[], options) => {
+    const query = queryParts.join(' ');
+    await easyedaSearchCommand(query, {
+      port: options.port ? parseInt(options.port, 10) : undefined,
     });
   });
 

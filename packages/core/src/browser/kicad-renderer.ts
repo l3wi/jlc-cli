@@ -19,6 +19,7 @@ import {
   getFillType,
   getPoints,
   getLayers,
+  type SExpr,
 } from './sexpr-parser.js'
 
 // Color schemes
@@ -146,7 +147,7 @@ export function renderSymbolSvg(sexpr: string): string {
 /**
  * Render symbol rectangle
  */
-function renderSymbolRectangle(rect: unknown[], bounds: BoundingBox): string {
+function renderSymbolRectangle(rect: SExpr[], bounds: BoundingBox): string {
   const start = getPoint(rect, 'start')
   const end = getPoint(rect, 'end')
   if (!start || !end) return ''
@@ -169,7 +170,7 @@ function renderSymbolRectangle(rect: unknown[], bounds: BoundingBox): string {
 /**
  * Render symbol polyline
  */
-function renderSymbolPolyline(polyline: unknown[], bounds: BoundingBox): string {
+function renderSymbolPolyline(polyline: SExpr[], bounds: BoundingBox): string {
   const points = getPoints(polyline)
   if (points.length < 2) return ''
 
@@ -188,7 +189,7 @@ function renderSymbolPolyline(polyline: unknown[], bounds: BoundingBox): string 
 /**
  * Render symbol circle
  */
-function renderSymbolCircle(circle: unknown[], bounds: BoundingBox): string {
+function renderSymbolCircle(circle: SExpr[], bounds: BoundingBox): string {
   const center = getPoint(circle, 'center')
   const radius = getNumericAttr(circle, 'radius')
   if (!center || radius === undefined) return ''
@@ -206,7 +207,7 @@ function renderSymbolCircle(circle: unknown[], bounds: BoundingBox): string {
 /**
  * Render symbol arc
  */
-function renderSymbolArc(arc: unknown[], bounds: BoundingBox): string {
+function renderSymbolArc(arc: SExpr[], bounds: BoundingBox): string {
   const start = getPoint(arc, 'start')
   const mid = getPoint(arc, 'mid')
   const end = getPoint(arc, 'end')
@@ -259,7 +260,7 @@ function calculateArcPath(
 /**
  * Render symbol pin
  */
-function renderSymbolPin(pin: unknown[], bounds: BoundingBox): string {
+function renderSymbolPin(pin: SExpr[], bounds: BoundingBox): string {
   const at = getPointWithRotation(pin, 'at')
   const length = getNumericAttr(pin, 'length') ?? 2.54
   if (!at) return ''
@@ -416,7 +417,7 @@ function getLayerColor(layer: string): string {
 /**
  * Render footprint pad
  */
-function renderFootprintPad(pad: unknown[], bounds: BoundingBox): string {
+function renderFootprintPad(pad: SExpr[], bounds: BoundingBox): string {
   // (pad "number" type shape (at x y [rot]) (size w h) (layers ...) ...)
   if (!isList(pad) || pad.length < 4) return ''
 
@@ -512,7 +513,7 @@ function renderFootprintPad(pad: unknown[], bounds: BoundingBox): string {
 /**
  * Render footprint line
  */
-function renderFootprintLine(line: unknown[], bounds: BoundingBox): string {
+function renderFootprintLine(line: SExpr[], bounds: BoundingBox): string {
   const start = getPoint(line, 'start')
   const end = getPoint(line, 'end')
   if (!start || !end) return ''
@@ -535,7 +536,7 @@ function renderFootprintLine(line: unknown[], bounds: BoundingBox): string {
 /**
  * Render footprint circle
  */
-function renderFootprintCircle(circle: unknown[], bounds: BoundingBox): string {
+function renderFootprintCircle(circle: SExpr[], bounds: BoundingBox): string {
   const center = getPoint(circle, 'center')
   const end = getPoint(circle, 'end')
   if (!center || !end) return ''
@@ -561,7 +562,7 @@ function renderFootprintCircle(circle: unknown[], bounds: BoundingBox): string {
 /**
  * Render footprint arc
  */
-function renderFootprintArc(arc: unknown[], bounds: BoundingBox): string {
+function renderFootprintArc(arc: SExpr[], bounds: BoundingBox): string {
   const start = getPoint(arc, 'start')
   const mid = getPoint(arc, 'mid')
   const end = getPoint(arc, 'end')
@@ -588,7 +589,7 @@ function renderFootprintArc(arc: unknown[], bounds: BoundingBox): string {
 /**
  * Render footprint text
  */
-function renderFootprintText(text: unknown[], bounds: BoundingBox): string {
+function renderFootprintText(text: SExpr[], bounds: BoundingBox): string {
   // (fp_text type "text" (at x y [rot]) (layer "...") (effects ...))
   if (!isList(text) || text.length < 3) return ''
 

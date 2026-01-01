@@ -19,10 +19,12 @@
     "./services": "./dist/services/index.js",
     "./api": "./dist/api/index.js",
     "./converter": "./dist/converter/index.js",
-    "./types": "./dist/types/index.js"
+    "./types": "./dist/types/index.js",
+    "./http": "./dist/http/index.js"
   },
   "scripts": {
-    "build": "tsc && bun build ./src/index.ts --outdir ./dist --target node",
+    "build": "tsc && bun build ./src/index.ts --outdir ./dist --target node && bun run build:browser",
+    "build:browser": "bun run scripts/build-search-page.ts",
     "dev": "bun --watch build",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

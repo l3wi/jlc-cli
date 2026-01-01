@@ -313,8 +313,9 @@ export function getLayers(expr: SExpr): string[] {
 
   const result: string[] = []
   for (let i = 1; i < layers.length; i++) {
-    if (isAtom(layers[i])) {
-      result.push(layers[i])
+    const item = layers[i]
+    if (isAtom(item)) {
+      result.push(item)
     }
   }
   return result

@@ -4,7 +4,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
-import { createLogger } from '@jlcpcb/core'
+import { createLogger } from '../utils/logger.js'
 import { handleRequest } from './routes.js'
 
 const logger = createLogger('http-server')
@@ -13,17 +13,24 @@ const DEFAULT_PORT = 3847
 
 let serverInstance: ReturnType<typeof createServer> | null = null
 
+export interface HttpServerOptions {
+  port?: number
+  onReady?: (url: string) => void
+}
+
 /**
  * Start the HTTP server
  * @returns The port the server is listening on
  */
-export function startHttpServer(): number {
+export function startHttpServer(options: HttpServerOptions = {}): number {
   if (serverInstance) {
     logger.debug('HTTP server already running')
-    return DEFAULT_PORT
+    const port = options.port ?? parseInt(process.env.JLC_MCP_HTTP_PORT || String(DEFAULT_PORT), 10)
+    options.onReady?.(`http://localhost:${port}`)
+    return port
   }
 
-  const port = parseInt(process.env.JLC_MCP_HTTP_PORT || String(DEFAULT_PORT), 10)
+  const port = options.port ?? parseInt(process.env.JLC_MCP_HTTP_PORT || String(DEFAULT_PORT), 10)
 
   serverInstance = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // Add CORS headers to all responses
@@ -48,7 +55,9 @@ export function startHttpServer(): number {
   })
 
   serverInstance.listen(port, () => {
-    logger.info(`HTTP server listening on http://localhost:${port}`)
+    const url = `http://localhost:${port}`
+    logger.info(`HTTP server listening on ${url}`)
+    options.onReady?.(url)
   })
 
   serverInstance.on('error', (error: NodeJS.ErrnoException) => {
