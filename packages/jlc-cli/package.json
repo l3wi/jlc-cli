@@ -1,0 +1,53 @@
+{
+  "name": "jlc-cli",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "CLI for JLC/EasyEDA component sourcing and KiCad library management",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/l3wi/jlc-cli.git",
+    "directory": "packages/jlc-cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "jlc": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target node",
+    "dev": "bun --watch ./src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "jlcpcb",
+    "jlc",
+    "easyeda",
+    "kicad",
+    "electronics",
+    "components",
+    "pcb",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@clack/prompts": "^0.9.1",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "ink": "6.6.0",
+    "ink-select-input": "6.2.0",
+    "jlc-core": "workspace:*",
+    "open": "11.0.0",
+    "react-devtools-core": "7.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "19.2.7"
+  }
+}

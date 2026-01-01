@@ -1,0 +1,49 @@
+{
+  "name": "jlc-mcp",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "MCP server for JLC/EasyEDA component sourcing, library fetching, and conversion to KiCad format",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/l3wi/jlc-cli.git",
+    "directory": "packages/jlc-mcp"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "jlc-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target node && bun run build:search",
+    "build:search": "bun run scripts/build-search-page.ts",
+    "start": "bun run ./src/index.ts",
+    "dev": "bun --watch ./src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "mcp",
+    "jlcpcb",
+    "jlc",
+    "easyeda",
+    "kicad",
+    "electronics",
+    "components",
+    "pcb"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "jlc-core": "workspace:*",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}

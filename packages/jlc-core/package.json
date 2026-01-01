@@ -1,0 +1,48 @@
+{
+  "name": "jlc-core",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Core library for JLC/EasyEDA component sourcing and KiCad conversion",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/l3wi/jlc-cli.git",
+    "directory": "packages/jlc-core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./services": "./dist/services/index.js",
+    "./api": "./dist/api/index.js",
+    "./converter": "./dist/converter/index.js",
+    "./types": "./dist/types/index.js"
+  },
+  "scripts": {
+    "build": "tsc && bun build ./src/index.ts --outdir ./dist --target node",
+    "dev": "bun --watch build",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "jlcpcb",
+    "jlc",
+    "easyeda",
+    "kicad",
+    "electronics",
+    "components",
+    "pcb"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}
