@@ -1,9 +1,14 @@
 {
   "$schema": "https://unpkg.com/@changesets/config@3.1.2/schema.json",
-  "changelog": "@changesets/cli/changelog",
+  "changelog": [
+    "@changesets/changelog-github",
+    { "repo": "l3wi/jlc-cli" }
+  ],
   "commit": false,
   "fixed": [],
-  "linked": [],
+  "linked": [
+    ["jlc-core", "jlc-cli", "jlc-mcp"]
+  ],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
