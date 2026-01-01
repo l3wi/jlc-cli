@@ -2,9 +2,9 @@
 
 > **Unofficial package** - This is a community-maintained tool and is not affiliated with, endorsed by, or officially connected to JLCPCB, LCSC, or EasyEDA.
 
-<video src="https://github.com/user-attachments/assets/7be693d3-0d82-473d-9fec-0d65fd994ca6" controls></video>
-
 Interactive terminal UI for JLCPCB component search and KiCad library management. Built with React and Ink for a rich terminal experience.
+
+<video src="https://github.com/user-attachments/assets/7be693d3-0d82-473d-9fec-0d65fd994ca6" controls></video>
 
 ## Installation
 
