@@ -34,15 +34,36 @@ const SYMBOL_COLORS = {
 
 const FOOTPRINT_COLORS = {
   background: '#000000',  // Black
-  fCu: '#CC0000',         // Red for front copper
-  bCu: '#0066CC',         // Blue for back copper
-  fSilkS: '#00FFFF',      // Cyan for silkscreen
-  bSilkS: '#FF00FF',      // Magenta for back silkscreen
-  fFab: '#C4A000',        // Gold for fab
-  fMask: '#660066',       // Purple for mask
-  drill: '#666666',       // Gray for drill holes
-  courtyard: '#444444',   // Dark gray for courtyard
-  edgeCuts: '#C4C400',    // Yellow for edge cuts
+  // Copper layers (KiCad defaults)
+  fCu: '#840000',         // F.Cu - dark red
+  bCu: '#008400',         // B.Cu - green
+  in1Cu: '#C2C200',       // In1.Cu - yellow
+  in2Cu: '#C200C2',       // In2.Cu - magenta
+  // Silkscreen
+  fSilkS: '#008484',      // F.SilkS - teal
+  bSilkS: '#840084',      // B.SilkS - purple
+  // Solder mask
+  fMask: '#840084',       // F.Mask - purple
+  bMask: '#848400',       // B.Mask - olive
+  // Paste
+  fPaste: '#840000',      // F.Paste - dark red
+  bPaste: '#00C2C2',      // B.Paste - cyan
+  // Fabrication
+  fFab: '#848484',        // F.Fab - gray
+  bFab: '#000084',        // B.Fab - dark blue
+  // Courtyard
+  fCrtYd: '#C2C2C2',      // F.CrtYd - light gray
+  bCrtYd: '#848484',      // B.CrtYd - gray
+  // Other layers
+  edgeCuts: '#C2C200',    // Edge.Cuts - yellow
+  dwgsUser: '#C2C2C2',    // Dwgs.User - light gray
+  cmtsUser: '#000084',    // Cmts.User - dark blue
+  margin: '#C200C2',      // Margin - magenta
+  // Pads
+  padFront: '#840000',    // Front SMD pads - red
+  padBack: '#008400',     // Back SMD pads - green
+  padThruHole: '#C2C200', // THT pads - yellow
+  drill: '#848484',       // Drill holes - gray
 }
 
 // Scale factor: KiCad uses mm, we render with pixels per mm
@@ -370,6 +391,40 @@ export function renderFootprintSvg(sexpr: string): string {
       if (svg) elements.push(svg)
     }
 
+    // Render rectangles
+    for (const rect of findChildren(parsed, 'fp_rect')) {
+      const svg = renderFootprintRect(rect, bounds)
+      if (svg) elements.push(svg)
+    }
+
+    // Render polygons (SOLIDREGION)
+    for (const poly of findChildren(parsed, 'fp_poly')) {
+      const svg = renderFootprintPoly(poly, bounds)
+      if (svg) elements.push(svg)
+    }
+
+    // Render gr_* elements (graphics primitives that may appear in footprints)
+    for (const line of findChildren(parsed, 'gr_line')) {
+      const svg = renderFootprintLine(line, bounds)
+      if (svg) elements.push(svg)
+    }
+    for (const circle of findChildren(parsed, 'gr_circle')) {
+      const svg = renderFootprintCircle(circle, bounds)
+      if (svg) elements.push(svg)
+    }
+    for (const arc of findChildren(parsed, 'gr_arc')) {
+      const svg = renderFootprintArc(arc, bounds)
+      if (svg) elements.push(svg)
+    }
+    for (const rect of findChildren(parsed, 'gr_rect')) {
+      const svg = renderFootprintRect(rect, bounds)
+      if (svg) elements.push(svg)
+    }
+    for (const poly of findChildren(parsed, 'gr_poly')) {
+      const svg = renderFootprintPoly(poly, bounds)
+      if (svg) elements.push(svg)
+    }
+
     // Render text (silkscreen only)
     for (const text of findChildren(parsed, 'fp_text')) {
       const svg = renderFootprintText(text, bounds)
@@ -401,17 +456,34 @@ export function renderFootprintSvg(sexpr: string): string {
 }
 
 /**
- * Get color for a footprint layer
+ * Get color for a footprint layer (KiCad default theme)
  */
 function getLayerColor(layer: string): string {
+  // Copper layers
   if (layer.includes('F.Cu')) return FOOTPRINT_COLORS.fCu
   if (layer.includes('B.Cu')) return FOOTPRINT_COLORS.bCu
+  if (/In\d+\.Cu/.test(layer)) return FOOTPRINT_COLORS.in1Cu
+  // Silkscreen
   if (layer.includes('F.SilkS')) return FOOTPRINT_COLORS.fSilkS
   if (layer.includes('B.SilkS')) return FOOTPRINT_COLORS.bSilkS
+  // Solder mask
+  if (layer.includes('F.Mask')) return FOOTPRINT_COLORS.fMask
+  if (layer.includes('B.Mask')) return FOOTPRINT_COLORS.bMask
+  // Paste
+  if (layer.includes('F.Paste')) return FOOTPRINT_COLORS.fPaste
+  if (layer.includes('B.Paste')) return FOOTPRINT_COLORS.bPaste
+  // Fabrication
   if (layer.includes('F.Fab')) return FOOTPRINT_COLORS.fFab
-  if (layer.includes('F.CrtYd')) return FOOTPRINT_COLORS.courtyard
+  if (layer.includes('B.Fab')) return FOOTPRINT_COLORS.bFab
+  // Courtyard
+  if (layer.includes('F.CrtYd')) return FOOTPRINT_COLORS.fCrtYd
+  if (layer.includes('B.CrtYd')) return FOOTPRINT_COLORS.bCrtYd
+  // Other layers
   if (layer.includes('Edge.Cuts')) return FOOTPRINT_COLORS.edgeCuts
-  return FOOTPRINT_COLORS.fSilkS // Default
+  if (layer.includes('Dwgs.User')) return FOOTPRINT_COLORS.dwgsUser
+  if (layer.includes('Cmts.User')) return FOOTPRINT_COLORS.cmtsUser
+  if (layer.includes('Margin')) return FOOTPRINT_COLORS.margin
+  return FOOTPRINT_COLORS.fSilkS // Default fallback
 }
 
 /**
@@ -434,7 +506,16 @@ function renderFootprintPad(pad: SExpr[], bounds: BoundingBox): string {
 
   const elements: string[] = []
   const layers = getLayers(pad)
-  const color = layers.some(l => l.includes('B.')) ? FOOTPRINT_COLORS.bCu : FOOTPRINT_COLORS.fCu
+
+  // Use KiCad-style pad colors: yellow for THT, red/green for SMD
+  let color: string
+  if (padType === 'thru_hole' || padType === 'np_thru_hole') {
+    color = FOOTPRINT_COLORS.padThruHole // Yellow for through-hole
+  } else if (layers.some(l => l.includes('B.'))) {
+    color = FOOTPRINT_COLORS.padBack // Green for back SMD
+  } else {
+    color = FOOTPRINT_COLORS.padFront // Red for front SMD
+  }
 
   // Render pad shape
   const rotation = at.rotation ?? 0
@@ -584,6 +665,66 @@ function renderFootprintArc(arc: SExpr[], bounds: BoundingBox): string {
   const arcPath = calculateArcPath(start, mid, end)
 
   return `<path d="${arcPath}" fill="none" stroke="${color}" stroke-width="${stroke?.width ?? 0.15}" stroke-linecap="round"/>`
+}
+
+/**
+ * Render footprint polygon (for SOLIDREGION)
+ */
+function renderFootprintPoly(poly: SExpr[], bounds: BoundingBox): string {
+  // (fp_poly (pts (xy x y) (xy x y) ...) (layer "...") (stroke ...) (fill ...))
+  const points = getPoints(poly)
+  if (points.length < 3) return ''
+
+  const layers = getLayers(poly)
+  const layer = layers[0] ?? 'F.Cu'
+
+  // Skip courtyard for cleaner preview
+  if (layer.includes('CrtYd')) return ''
+
+  const color = getLayerColor(layer)
+  const stroke = getStroke(poly)
+  const fillType = getFillType(poly)
+  const fill = fillType === 'solid' || fillType === 'yes' ? color : 'none'
+
+  const pointsStr = points.map(p => {
+    updateBounds(bounds, p.x, p.y)
+    return `${p.x},${p.y}`
+  }).join(' ')
+
+  const strokeWidth = stroke?.width ?? 0
+  const strokeAttr = strokeWidth > 0 ? ` stroke="${color}" stroke-width="${strokeWidth}"` : ''
+
+  return `<polygon points="${pointsStr}" fill="${fill}"${strokeAttr}/>`
+}
+
+/**
+ * Render footprint rectangle
+ */
+function renderFootprintRect(rect: SExpr[], bounds: BoundingBox): string {
+  const start = getPoint(rect, 'start')
+  const end = getPoint(rect, 'end')
+  if (!start || !end) return ''
+
+  const layers = getLayers(rect)
+  const layer = layers[0] ?? 'F.SilkS'
+
+  // Skip courtyard for cleaner preview
+  if (layer.includes('CrtYd')) return ''
+
+  const color = getLayerColor(layer)
+  const stroke = getStroke(rect)
+  const fillType = getFillType(rect)
+  const fill = fillType === 'solid' ? color : 'none'
+
+  updateBounds(bounds, start.x, start.y)
+  updateBounds(bounds, end.x, end.y)
+
+  const x = Math.min(start.x, end.x)
+  const y = Math.min(start.y, end.y)
+  const w = Math.abs(end.x - start.x)
+  const h = Math.abs(end.y - start.y)
+
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${color}" stroke-width="${stroke?.width ?? 0.15}"/>`
 }
 
 /**

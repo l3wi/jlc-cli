@@ -46,6 +46,11 @@ function getHtmlPage(): string {
       join(process.cwd(), 'packages/core/dist/assets/search.html'),
       // When imported from other packages
       join(__dirname, '../../dist/assets/search.html'),
+      // When bundled into CLI or other package, look for core's assets relative to monorepo
+      join(__dirname, '../../../core/dist/assets/search.html'),
+      join(__dirname, '../../../../packages/core/dist/assets/search.html'),
+      // Look in node_modules if installed as dependency
+      join(__dirname, '../../node_modules/@jlcpcb/core/dist/assets/search.html'),
     ]
 
     for (const path of possiblePaths) {

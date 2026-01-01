@@ -18,7 +18,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target node",
+    "build": "bun build ./src/index.ts --outdir ./dist --target node && mkdir -p ./dist/assets && cp ../core/dist/assets/search.html ./dist/assets/",
     "dev": "bun --watch ./src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
