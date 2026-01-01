@@ -11,7 +11,7 @@ import {
   easyedaClient,
   symbolConverter,
   footprintConverter,
-} from 'jlc-core';
+} from '@jlcpcb/core';
 
 const libraryService = createLibraryService();
 const componentService = createComponentService();

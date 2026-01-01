@@ -5,7 +5,7 @@
 
 import * as p from '@clack/prompts';
 import chalk from 'chalk';
-import { createComponentService } from 'jlc-core';
+import { createComponentService } from '@jlcpcb/core';
 import { renderApp } from '../app/App.js';
 
 const componentService = createComponentService();

@@ -4,7 +4,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
-import { createLogger } from 'jlc-core'
+import { createLogger } from '@jlcpcb/core'
 import { handleRequest } from './routes.js'
 
 const logger = createLogger('http-server')

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { InstalledComponent } from 'jlc-core';
+import type { InstalledComponent } from '@jlcpcb/core';
 import { Divider } from './Divider.js';
 
 // Flexible component type that accepts both ComponentSearchResult and ComponentDetails

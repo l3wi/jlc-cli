@@ -20,7 +20,7 @@ import {
   ensureDir,
   writeText,
   type EasyEDAPin,
-} from 'jlc-core';
+} from '@jlcpcb/core';
 import { join } from 'path';
 
 // KiCad versions to check (newest first)

@@ -1,6 +1,6 @@
 {
-  "name": "jlc-core",
-  "version": "0.1.0",
+  "name": "@jlcpcb/core",
+  "version": "0.0.1",
   "private": false,
   "type": "module",
   "description": "Core library for JLC/EasyEDA component sourcing and KiCad conversion",

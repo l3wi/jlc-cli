@@ -7,7 +7,7 @@
   "commit": false,
   "fixed": [],
   "linked": [
-    ["jlc-core", "jlc-cli", "jlc-mcp"]
+    ["@jlcpcb/core", "@jlcpcb/cli", "@jlcpcb/mcp"]
   ],
   "access": "public",
   "baseBranch": "main",

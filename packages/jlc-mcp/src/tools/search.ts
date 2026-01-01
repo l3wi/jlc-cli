@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { jlcClient } from 'jlc-core';
+import { jlcClient } from '@jlcpcb/core';
 
 export const searchComponentsTool: Tool = {
   name: 'component_search',

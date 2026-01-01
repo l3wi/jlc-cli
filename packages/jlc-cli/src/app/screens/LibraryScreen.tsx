@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { createLibraryService, createComponentService, type InstalledComponent, type LibraryStatus } from 'jlc-core';
+import { createLibraryService, createComponentService, type InstalledComponent, type LibraryStatus } from '@jlcpcb/core';
 import { useNavigation, useCurrentScreen } from '../navigation/NavigationContext.js';
 import type { LibraryParams } from '../navigation/types.js';
 import { useAppState } from '../state/AppStateContext.js';

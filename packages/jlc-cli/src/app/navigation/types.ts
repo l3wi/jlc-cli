@@ -1,4 +1,4 @@
-import type { ComponentSearchResult, ComponentDetails, InstallResult, InstalledComponent, LibraryStatus } from 'jlc-core';
+import type { ComponentSearchResult, ComponentDetails, InstallResult, InstalledComponent, LibraryStatus } from '@jlcpcb/core';
 
 export type ScreenName = 'search' | 'info' | 'install' | 'library' | 'library-setup' | 'installed';
 

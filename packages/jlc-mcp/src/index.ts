@@ -19,7 +19,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { tools, toolHandlers } from './tools/index.js';
-import { createLogger, ensureGlobalLibraryTables } from 'jlc-core';
+import { createLogger, ensureGlobalLibraryTables } from '@jlcpcb/core';
 import { startHttpServer } from './http/server.js';
 
 const logger = createLogger('jlc-mcp');

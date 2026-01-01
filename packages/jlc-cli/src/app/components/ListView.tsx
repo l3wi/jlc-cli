@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { ComponentSearchResult } from 'jlc-core';
+import type { ComponentSearchResult } from '@jlcpcb/core';
 import { Divider } from './Divider.js';
 
 interface ListViewProps {

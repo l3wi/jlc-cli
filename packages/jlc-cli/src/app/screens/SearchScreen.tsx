@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { createComponentService, type ComponentSearchResult } from 'jlc-core';
+import { createComponentService, type ComponentSearchResult } from '@jlcpcb/core';
 import { useNavigation, useCurrentScreen } from '../navigation/NavigationContext.js';
 import type { SearchParams } from '../navigation/types.js';
 import { useAppState } from '../state/AppStateContext.js';

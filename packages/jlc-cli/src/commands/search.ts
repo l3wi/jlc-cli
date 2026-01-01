@@ -3,7 +3,7 @@
  * Interactive search for components from LCSC or EasyEDA community
  */
 
-import { createComponentService, type SearchOptions } from 'jlc-core';
+import { createComponentService, type SearchOptions } from '@jlcpcb/core';
 import { renderApp } from '../app/App.js';
 
 const componentService = createComponentService();

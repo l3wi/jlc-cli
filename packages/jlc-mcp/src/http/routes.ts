@@ -16,7 +16,7 @@ import {
   easyedaCommunityClient,
   symbolConverter,
   footprintConverter,
-} from 'jlc-core'
+} from '@jlcpcb/core'
 
 const logger = createLogger('http-routes')
 

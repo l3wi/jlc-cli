@@ -21,7 +21,7 @@ import {
   type LibraryCategory,
   ensureDir,
   writeText,
-} from 'jlc-core';
+} from '@jlcpcb/core';
 import { join } from 'path';
 
 // KiCad versions to check (newest first)

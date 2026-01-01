@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { createLibraryService } from 'jlc-core';
+import { createLibraryService } from '@jlcpcb/core';
 import { useNavigation, useCurrentScreen } from '../navigation/NavigationContext.js';
 import type { LibrarySetupParams } from '../navigation/types.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';

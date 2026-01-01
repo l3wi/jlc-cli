@@ -1,6 +1,6 @@
 {
-  "name": "jlc-mcp",
-  "version": "0.1.0",
+  "name": "@jlcpcb/mcp",
+  "version": "0.0.1",
   "private": false,
   "type": "module",
   "description": "MCP server for JLC/EasyEDA component sourcing, library fetching, and conversion to KiCad format",
@@ -40,7 +40,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "jlc-core": "workspace:*",
+    "@jlcpcb/core": "workspace:*",
     "zod": "^3.22.0"
   },
   "devDependencies": {

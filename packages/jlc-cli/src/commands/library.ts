@@ -4,7 +4,7 @@
  */
 
 import * as p from '@clack/prompts';
-import { createLibraryService } from 'jlc-core';
+import { createLibraryService } from '@jlcpcb/core';
 import { renderApp } from '../app/App.js';
 
 const libraryService = createLibraryService();
