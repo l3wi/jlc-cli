@@ -467,13 +467,14 @@ export class FootprintConverter {
     }
 
     // Determine if SMD or THT
-    // Use holeRadius if available, otherwise check isPlated flag for polygon pads
+    // Use holeRadius if available, otherwise check layer for polygon pads
     let holeRadius = pad.holeRadius;
-    if (holeRadius === 0 && pad.isPlated && pad.shape === 'POLYGON') {
-      // EasyEDA polygon pads often have holeRadius=0 even for THT
+    if (holeRadius === 0 && pad.layerId === 11 && pad.shape === 'POLYGON') {
+      // layerId=11 means all copper layers (THT), but holeRadius may be missing
       // Calculate drill size from polygon bounds (inscribed circle approximation)
       holeRadius = this.calculateDrillRadiusFromPolygon(points, pad.centerX, pad.centerY);
     }
+    // Note: isPlated=true just means copper is present, which applies to both SMD and THT
 
     const isSmd = holeRadius === 0;
     const padType = isSmd ? 'smd' : 'thru_hole';

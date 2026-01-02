@@ -253,6 +253,25 @@ function extractPadShape(content: string): {
   let holeRadius: number | undefined;
   let rotation: number | undefined;
 
+  // First try to get dimensions from group tag attributes (most reliable)
+  // Format: c_width="4.7244" c_height="7.0866"
+  const groupWidthMatch = content.match(/c_width="([^"]+)"/);
+  const groupHeightMatch = content.match(/c_height="([^"]+)"/);
+  if (groupWidthMatch && groupHeightMatch) {
+    width = parseFloat(groupWidthMatch[1]) * EE_TO_MM;
+    height = parseFloat(groupHeightMatch[1]) * EE_TO_MM;
+  }
+
+  // Get shape from c_shape attribute if available
+  const shapeAttrMatch = content.match(/c_shape="([^"]+)"/);
+  if (shapeAttrMatch) {
+    const shapeAttr = shapeAttrMatch[1].toUpperCase();
+    if (shapeAttr === 'RECT') shape = 'rect';
+    else if (shapeAttr === 'OVAL' || shapeAttr === 'ELLIPSE') shape = 'oval';
+    else if (shapeAttr === 'POLYGON') shape = 'polygon';
+    else if (shapeAttr === 'CIRCLE') shape = 'circle';
+  }
+
   // Check for rect
   const rectMatch = content.match(/<rect[^>]*width="([^"]+)"[^>]*height="([^"]+)"[^>]*>/);
   if (rectMatch) {
@@ -305,18 +324,32 @@ function extractPadShape(content: string): {
     }
   }
 
-  // Check for hole (inner circle with different color/fill)
-  // Holes are typically rendered as inner circles
-  const holeMatch = content.match(/<circle[^>]*class="[^"]*hole[^"]*"[^>]*r="([^"]+)"[^>]*>/i);
-  if (holeMatch) {
-    hasHole = true;
-    holeRadius = parseFloat(holeMatch[1]) * EE_TO_MM;
+  // Check for hole using c_padhole="1" attribute
+  // SMD pads have <circle c_padhole="1" r="0">
+  // THT round holes have <circle c_padhole="1" r="X"> where X > 0
+  // THT slot holes have <polyline c_padhole="1" stroke-width="X">
+  const circleHoleMatch = content.match(/<circle[^>]*c_padhole="1"[^>]*r="([^"]+)"[^>]*>/i);
+  if (circleHoleMatch) {
+    const radius = parseFloat(circleHoleMatch[1]);
+    if (radius > 0) {
+      hasHole = true;
+      holeRadius = radius * EE_TO_MM;
+    }
   }
 
-  // Also check for c_etype="pinhole" attribute
-  if (content.includes('c_etype="pinhole"')) {
+  // Check for slot holes (polyline with c_padhole="1")
+  const polylineHoleMatch = content.match(/<polyline[^>]*c_padhole="1"[^>]*stroke-width="([^"]+)"[^>]*>/i);
+  if (polylineHoleMatch) {
+    const strokeWidth = parseFloat(polylineHoleMatch[1]);
+    if (strokeWidth > 0) {
+      hasHole = true;
+      holeRadius = (strokeWidth / 2) * EE_TO_MM; // stroke-width is diameter
+    }
+  }
+
+  // Legacy check for c_etype="pinhole" attribute
+  if (!hasHole && content.includes('c_etype="pinhole"')) {
     hasHole = true;
-    // Try to find the hole radius
     const innerCircle = content.match(/<circle[^>]*fill="[^"]*(?:white|#fff)[^"]*"[^>]*r="([^"]+)"/i);
     if (innerCircle) {
       holeRadius = parseFloat(innerCircle[1]) * EE_TO_MM;
