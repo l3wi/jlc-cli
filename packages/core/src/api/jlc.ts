@@ -8,6 +8,14 @@ import { createLogger } from '../utils/index.js';
 
 const logger = createLogger('jlc-api');
 
+/**
+ * Strip temperature range prefix from descriptions
+ * Matches patterns like "-40℃~+70℃ " at the start only
+ */
+function stripTemperaturePrefix(description: string): string {
+  return description.replace(/^-?\d+℃~[+-]?\d+℃\s*/, '');
+}
+
 // JLCPCB parts API - provides LCSC component data with better reliability
 const JLCPCB_SEARCH_API =
   'https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/selectSmtComponentList/v2';
@@ -125,7 +133,7 @@ export class JLCClient {
         package: c.componentSpecificationEn || '',
         price: c.componentPrices?.[0]?.productPrice,
         stock: c.stockCount,
-        description: c.describe,
+        description: stripTemperaturePrefix(c.describe),
         productUrl: c.lcscGoodsUrl,      // LCSC product page
         datasheetPdf: c.dataManualUrl,   // Actual PDF datasheet
         category: c.componentTypeEn,
