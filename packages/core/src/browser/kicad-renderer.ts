@@ -57,7 +57,7 @@ const FOOTPRINT_COLORS = {
   // Other layers
   edgeCuts: '#C2C200',    // Edge.Cuts - yellow
   dwgsUser: '#C2C2C2',    // Dwgs.User - light gray
-  cmtsUser: '#000084',    // Cmts.User - dark blue
+  cmtsUser: '#848484',    // Cmts.User - gray
   margin: '#C200C2',      // Margin - magenta
   // Pads
   padFront: '#840000',    // Front SMD pads - red
@@ -747,24 +747,49 @@ function renderFootprintText(text: SExpr[], bounds: BoundingBox): string {
   const layer = layers[0] ?? 'F.SilkS'
   const color = getLayerColor(layer)
 
-  // Get font size from effects
+  // Parse font size and justification from effects
   const effects = findChild(text, 'effects')
   let fontSize = 1
+  let textAnchor = 'middle' // default: centered
+
   if (effects) {
+    // Get font size
     const font = findChild(effects, 'font')
     if (font) {
       const size = getSize(font)
       if (size) fontSize = size.height
     }
+
+    // Get justification: (justify left/right/center)
+    const justify = findChild(effects, 'justify')
+    if (justify) {
+      for (let i = 1; i < justify.length; i++) {
+        const val = isAtom(justify[i]) ? justify[i] : ''
+        if (val === 'left') textAnchor = 'start'
+        else if (val === 'right') textAnchor = 'end'
+      }
+    }
   }
 
-  updateBounds(bounds, at.x - 2, at.y - 1)
-  updateBounds(bounds, at.x + 2, at.y + 1)
+  // Estimate text bounds based on content and justification
+  const textWidth = textContent.length * fontSize * 0.6
+  const textHeight = fontSize
+
+  if (textAnchor === 'start') {
+    updateBounds(bounds, at.x, at.y - textHeight / 2)
+    updateBounds(bounds, at.x + textWidth, at.y + textHeight / 2)
+  } else if (textAnchor === 'end') {
+    updateBounds(bounds, at.x - textWidth, at.y - textHeight / 2)
+    updateBounds(bounds, at.x, at.y + textHeight / 2)
+  } else {
+    updateBounds(bounds, at.x - textWidth / 2, at.y - textHeight / 2)
+    updateBounds(bounds, at.x + textWidth / 2, at.y + textHeight / 2)
+  }
 
   const rotation = at.rotation ?? 0
   const transform = rotation !== 0 ? ` transform="rotate(${rotation}, ${at.x}, ${at.y})"` : ''
 
-  return `<text x="${at.x}" y="${at.y}" fill="${color}" font-size="${fontSize}" font-family="sans-serif" text-anchor="middle" dominant-baseline="central"${transform}>${escapeXml(textContent)}</text>`
+  return `<text x="${at.x}" y="${at.y}" dy="0.35em" fill="${color}" font-size="${fontSize}" font-family="sans-serif" text-anchor="${textAnchor}"${transform}>${escapeXml(textContent)}</text>`
 }
 
 /**

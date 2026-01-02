@@ -332,6 +332,77 @@ export interface GlobalRegistrationResult {
  * Main entry point: Ensure JLC libraries are registered in KiCad global tables
  * Call this on MCP server startup
  */
+// EasyEDA library naming
+const EASYEDA_LIBRARY_NAME = 'EasyEDA';
+const EASYEDA_SYMBOL_LIBRARY_NAME = 'EasyEDA.kicad_sym';
+const EASYEDA_FOOTPRINT_LIBRARY_NAME = 'EasyEDA.pretty';
+const EASYEDA_LIBRARY_DESCRIPTION = 'EasyEDA Community Component Library';
+
+/**
+ * Get portable URI for EasyEDA symbol library (for global table entries)
+ */
+function getEasyEDASymbolLibUri(): string {
+  return `${KICAD_3RD_PARTY_VAR}/${LIBRARY_NAMESPACE}/symbols/${EASYEDA_SYMBOL_LIBRARY_NAME}`;
+}
+
+/**
+ * Get portable URI for EasyEDA footprint library (for global table entries)
+ */
+function getEasyEDAFootprintLibUri(): string {
+  return `${KICAD_3RD_PARTY_VAR}/${LIBRARY_NAMESPACE}/footprints/${EASYEDA_FOOTPRINT_LIBRARY_NAME}`;
+}
+
+/**
+ * Ensure EasyEDA library is registered in global sym-lib-table and fp-lib-table
+ */
+export async function ensureGlobalEasyEDALibrary(): Promise<void> {
+  const version = detectKicadVersion();
+  const configDir = getKicadConfigDir(version);
+
+  // Ensure config directory exists
+  await mkdir(configDir, { recursive: true });
+
+  // Update sym-lib-table
+  const symTablePath = join(configDir, 'sym-lib-table');
+  if (existsSync(symTablePath)) {
+    let content = await readFile(symTablePath, 'utf-8');
+    if (!libraryExistsInTable(content, EASYEDA_LIBRARY_NAME)) {
+      const uri = getEasyEDASymbolLibUri();
+      content = addLibraryToTable(content, EASYEDA_LIBRARY_NAME, uri, 'sym', EASYEDA_LIBRARY_DESCRIPTION);
+      await writeFile(symTablePath, content, 'utf-8');
+    }
+  } else {
+    // Create new table with EasyEDA library
+    const uri = getEasyEDASymbolLibUri();
+    const content = `(sym_lib_table
+  (version 7)
+  (lib (name "${EASYEDA_LIBRARY_NAME}")(type "KiCad")(uri "${uri}")(options "")(descr "${EASYEDA_LIBRARY_DESCRIPTION}"))
+)
+`;
+    await writeFile(symTablePath, content, 'utf-8');
+  }
+
+  // Update fp-lib-table
+  const fpTablePath = join(configDir, 'fp-lib-table');
+  if (existsSync(fpTablePath)) {
+    let content = await readFile(fpTablePath, 'utf-8');
+    if (!libraryExistsInTable(content, EASYEDA_LIBRARY_NAME)) {
+      const uri = getEasyEDAFootprintLibUri();
+      content = addLibraryToTable(content, EASYEDA_LIBRARY_NAME, uri, 'fp', EASYEDA_LIBRARY_DESCRIPTION);
+      await writeFile(fpTablePath, content, 'utf-8');
+    }
+  } else {
+    // Create new table with EasyEDA library
+    const uri = getEasyEDAFootprintLibUri();
+    const content = `(fp_lib_table
+  (version 7)
+  (lib (name "${EASYEDA_LIBRARY_NAME}")(type "KiCad")(uri "${uri}")(options "")(descr "${EASYEDA_LIBRARY_DESCRIPTION}"))
+)
+`;
+    await writeFile(fpTablePath, content, 'utf-8');
+  }
+}
+
 export async function ensureGlobalLibraryTables(): Promise<GlobalRegistrationResult> {
   const errors: string[] = [];
   const version = detectKicadVersion();

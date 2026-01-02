@@ -609,7 +609,8 @@ export function parseFootprintShapes(shapes: string[]): ParsedFootprintData {
   }
 
   // Determine type based on pads
-  const type = pads.some(p => p.holeRadius > 0) ? 'tht' : 'smd';
+  // Check both holeRadius > 0 and isPlated polygon pads (EasyEDA often has holeRadius=0 for polygon THT)
+  const type = pads.some(p => p.holeRadius > 0 || (p.shape === 'POLYGON' && p.isPlated)) ? 'tht' : 'smd';
 
   return {
     name: 'Unknown', // Will be set by caller

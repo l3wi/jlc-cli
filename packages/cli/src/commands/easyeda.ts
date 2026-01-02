@@ -4,7 +4,19 @@
  */
 
 import open from 'open'
-import { startHttpServer, stopHttpServer } from '@jlcpcb/core'
+import * as p from '@clack/prompts'
+import chalk from 'chalk'
+import {
+  startHttpServer,
+  stopHttpServer,
+  createComponentService,
+  createLibraryService,
+  type SearchOptions,
+} from '@jlcpcb/core'
+import { renderApp } from '../app/App.js'
+
+const componentService = createComponentService()
+const libraryService = createLibraryService()
 
 interface EasyedaSearchOptions {
   port?: number
@@ -45,4 +57,95 @@ export async function easyedaSearchCommand(
       process.exit(0)
     })
   })
+}
+
+interface EasyedaInstallOptions {
+  projectPath?: string
+  include3d?: boolean
+  force?: boolean
+}
+
+/**
+ * Install an EasyEDA community component to KiCad libraries
+ */
+export async function easyedaInstallCommand(
+  uuid: string | undefined,
+  options: EasyedaInstallOptions
+): Promise<void> {
+  // If UUID provided with --force, do direct install (non-interactive)
+  if (uuid && options.force) {
+    const spinner = p.spinner()
+    spinner.start(`Installing EasyEDA component ${uuid}...`)
+
+    try {
+      // Ensure libraries are set up
+      await libraryService.ensureGlobalTables()
+
+      // Install the component
+      const result = await libraryService.install(uuid, {
+        projectPath: options.projectPath,
+        include3d: options.include3d,
+        force: true,
+      })
+
+      spinner.stop(chalk.green('✓ Component installed'))
+
+      // Display result
+      console.log()
+      console.log(chalk.cyan('Symbol:    '), result.symbolRef)
+      console.log(chalk.cyan('Footprint: '), result.footprintRef)
+      console.log(chalk.cyan('Action:    '), result.symbolAction)
+      if (result.files.model3d) {
+        console.log(chalk.cyan('3D Model:  '), result.files.model3d)
+      }
+      console.log()
+      console.log(chalk.dim(`Library: ${result.files.symbolLibrary}`))
+    } catch (error) {
+      spinner.stop(chalk.red('✗ Installation failed'))
+      p.log.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      process.exit(1)
+    }
+    return
+  }
+
+  // If UUID provided (without --force), launch TUI to fetch and display
+  if (uuid) {
+    // Launch TUI at EasyEDA info screen - let it fetch the component
+    renderApp('easyeda-info', { uuid })
+    return
+  }
+
+  // No UUID provided - interactive search mode
+  const query = await p.text({
+    message: 'Search EasyEDA community library:',
+    placeholder: 'e.g., STM32F103, ESP32, Arduino Nano',
+    validate: (value) => {
+      if (!value) return 'Please enter a search term'
+      return undefined
+    },
+  })
+
+  if (p.isCancel(query)) {
+    p.cancel('Installation cancelled')
+    process.exit(0)
+  }
+
+  const spinner = p.spinner()
+  spinner.start(`Searching EasyEDA community for "${query}"...`)
+
+  const searchOptions: SearchOptions = {
+    limit: 20,
+    source: 'easyeda-community',
+  }
+  const results = await componentService.search(query as string, searchOptions)
+
+  spinner.stop(`Found ${results.length} results`)
+
+  if (results.length === 0) {
+    p.log.warn('No components found. Try a different search term.')
+    return
+  }
+
+  // Launch TUI for selection and install
+  renderApp('search', { query: query as string, results })
 }

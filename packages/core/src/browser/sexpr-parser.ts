@@ -270,12 +270,23 @@ export function getStroke(
 }
 
 /**
- * Get fill type from (fill (type ...)) element
+ * Get fill type from (fill ...) element
+ * Handles both (fill solid) and (fill (type solid)) formats
  */
 export function getFillType(expr: SExpr): string | undefined {
   const fill = findChild(expr, 'fill')
   if (!fill) return undefined
-  return getAttr(fill, 'type')
+
+  // Check for (fill (type solid)) format
+  const typeAttr = getAttr(fill, 'type')
+  if (typeAttr) return typeAttr
+
+  // Check for (fill solid) format - value is second element
+  if (fill.length >= 2 && isAtom(fill[1])) {
+    return fill[1]
+  }
+
+  return undefined
 }
 
 /**

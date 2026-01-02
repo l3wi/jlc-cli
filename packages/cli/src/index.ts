@@ -10,7 +10,7 @@ import { searchCommand } from './commands/search.js';
 import { infoCommand } from './commands/info.js';
 import { installCommand } from './commands/install.js';
 import { libraryCommand } from './commands/library.js';
-import { easyedaSearchCommand } from './commands/easyeda.js';
+import { easyedaSearchCommand, easyedaInstallCommand } from './commands/easyeda.js';
 
 const program = new Command();
 
@@ -81,6 +81,20 @@ easyeda
     const query = queryParts.join(' ');
     await easyedaSearchCommand(query, {
       port: options.port ? parseInt(options.port, 10) : undefined,
+    });
+  });
+
+easyeda
+  .command('install [uuid]')
+  .description('Install EasyEDA community component to KiCad libraries')
+  .option('-p, --project <path>', 'Install to project-local library')
+  .option('--with-3d', 'Include 3D model')
+  .option('-f, --force', 'Force reinstall (regenerate symbol and footprint)')
+  .action(async (uuid, options) => {
+    await easyedaInstallCommand(uuid, {
+      projectPath: options.project,
+      include3d: options.with3d,
+      force: options.force,
     });
   });
 

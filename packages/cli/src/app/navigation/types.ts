@@ -1,6 +1,6 @@
-import type { ComponentSearchResult, ComponentDetails, InstallResult, InstalledComponent, LibraryStatus } from '@jlcpcb/core';
+import type { ComponentSearchResult, ComponentDetails, InstallResult, InstalledComponent, LibraryStatus, EasyEDACommunityComponent } from '@jlcpcb/core';
 
-export type ScreenName = 'search' | 'info' | 'install' | 'library' | 'library-setup' | 'installed';
+export type ScreenName = 'search' | 'info' | 'install' | 'library' | 'library-setup' | 'installed' | 'easyeda-info';
 
 // Common component type that works across screens
 export type ComponentInfo = ComponentSearchResult | ComponentDetails;
@@ -37,6 +37,11 @@ export interface InstalledParams {
   error?: string;
 }
 
+export interface EasyEDAInfoParams {
+  uuid: string;
+  component?: EasyEDACommunityComponent;
+}
+
 export interface ScreenParams {
   search: SearchParams;
   info: InfoParams;
@@ -44,6 +49,7 @@ export interface ScreenParams {
   library: LibraryParams;
   'library-setup': LibrarySetupParams;
   installed: InstalledParams;
+  'easyeda-info': EasyEDAInfoParams;
 }
 
 export interface HistoryEntry<T extends ScreenName = ScreenName> {

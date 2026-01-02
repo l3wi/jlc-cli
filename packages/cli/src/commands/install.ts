@@ -11,6 +11,11 @@ import { renderApp } from '../app/App.js';
 const componentService = createComponentService();
 const libraryService = createLibraryService();
 
+// LCSC IDs match pattern: C followed by digits (e.g., C2040, C5446)
+function isLcscId(id: string): boolean {
+  return /^C\d+$/i.test(id);
+}
+
 interface InstallOptions {
   projectPath?: string;
   include3d?: boolean;
@@ -18,6 +23,13 @@ interface InstallOptions {
 }
 
 export async function installCommand(id: string | undefined, options: InstallOptions): Promise<void> {
+  // Check if ID looks like an EasyEDA UUID (not an LCSC ID)
+  if (id && !isLcscId(id)) {
+    p.log.error(`"${id}" is not an LCSC part number (e.g., C2040).`);
+    p.log.info(`For EasyEDA community components, use: ${chalk.cyan(`jlc easyeda install ${id}`)}`);
+    process.exit(1);
+  }
+
   // If ID provided with --force, do direct install (non-interactive)
   if (id && options.force) {
     const spinner = p.spinner();

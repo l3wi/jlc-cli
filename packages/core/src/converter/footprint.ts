@@ -54,10 +54,11 @@ const KI_PAD_LAYER_SMD: Record<number, string> = {
   11: '"*.Cu" "*.Paste" "*.Mask"',
 };
 
-// Layer mapping for THT pads (no paste layer)
+// Layer mapping for THT pads (no paste layer, all copper layers)
+// THT pads go through all layers regardless of original layer ID
 const KI_PAD_LAYER_THT: Record<number, string> = {
-  1: '"F.Cu" "F.Mask"',
-  2: '"B.Cu" "B.Mask"',
+  1: '"*.Cu" "*.Mask"',
+  2: '"*.Cu" "*.Mask"',
   11: '"*.Cu" "*.Mask"',
 };
 
@@ -450,8 +451,11 @@ export class FootprintConverter {
   /**
    * Generate custom POLYGON pad using gr_poly primitive
    * Supports both SMD and through-hole polygon pads
+   *
+   * Note: EasyEDA polygon pads may have holeRadius=0 even for through-hole pads.
+   * We use isPlated=true as a hint and calculate drill size from polygon geometry.
    */
-  private generatePolygonPad(pad: EasyEDAPad, origin: Point, layers: string): string {
+  private generatePolygonPad(pad: EasyEDAPad, origin: Point, _layers: string): string {
     const x = convertX(pad.centerX, origin.x);
     const y = convertY(pad.centerY, origin.y);
 
@@ -462,9 +466,19 @@ export class FootprintConverter {
       return this.generatePad({ ...pad, shape: 'RECT', points: '' }, origin);
     }
 
-    // Determine if SMD or THT based on hole radius (same logic as generatePad)
-    const isSmd = pad.holeRadius === 0;
+    // Determine if SMD or THT
+    // Use holeRadius if available, otherwise check isPlated flag for polygon pads
+    let holeRadius = pad.holeRadius;
+    if (holeRadius === 0 && pad.isPlated && pad.shape === 'POLYGON') {
+      // EasyEDA polygon pads often have holeRadius=0 even for THT
+      // Calculate drill size from polygon bounds (inscribed circle approximation)
+      holeRadius = this.calculateDrillRadiusFromPolygon(points, pad.centerX, pad.centerY);
+    }
+
+    const isSmd = holeRadius === 0;
     const padType = isSmd ? 'smd' : 'thru_hole';
+    // Recalculate layers based on actual SMD/THT determination
+    const layers = getPadLayers(pad.layerId, isSmd);
 
     // Convert points relative to pad center (no Y-flip - KiCad footprints use same Y convention)
     const polyPoints = points.map((p) => ({
@@ -479,7 +493,7 @@ export class FootprintConverter {
 
     // Add drill for through-hole pads
     if (!isSmd) {
-      const drillDiameter = roundTo(toMM(pad.holeRadius * 2), 4);
+      const drillDiameter = roundTo(toMM(holeRadius * 2), 4);
       if (pad.holeLength && pad.holeLength > 0) {
         // Slot/oval hole
         const holeH = roundTo(toMM(pad.holeLength), 4);
@@ -505,6 +519,38 @@ export class FootprintConverter {
     output += `\t)\n`;
 
     return output;
+  }
+
+  /**
+   * Calculate drill radius from polygon points
+   * Uses inscribed circle approximation: smallest distance from center to any edge
+   * Returns radius in EasyEDA units (10mil)
+   */
+  private calculateDrillRadiusFromPolygon(points: Point[], centerX: number, centerY: number): number {
+    if (points.length < 3) return 0;
+
+    // Calculate bounding box relative to pad center
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+
+    for (const pt of points) {
+      const relX = pt.x - centerX;
+      const relY = pt.y - centerY;
+      minX = Math.min(minX, relX);
+      maxX = Math.max(maxX, relX);
+      minY = Math.min(minY, relY);
+      maxY = Math.max(maxY, relY);
+    }
+
+    // Use smaller dimension as basis for drill size
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const minDim = Math.min(width, height);
+
+    // Drill is typically 60% of the smallest copper dimension
+    // This accounts for annular ring requirements
+    const drillDiameter = minDim * 0.6;
+    return drillDiameter / 2; // Return radius
   }
 
   /**
@@ -669,16 +715,17 @@ export class FootprintConverter {
     const fontSize = roundTo(toMM(text.fontSize), 2);
     const rotation = text.rotation || 0;
 
-    // Determine text justification based on position relative to origin
-    // EasyEDA text coordinates are anchor points, not center points
-    // Left side text should extend right (justify left)
-    // Right side text should extend left (justify right)
+    // Use EasyEDA's text alignment type directly
+    // type "L" = left-aligned (text starts at position)
+    // type "R" = right-aligned (text ends at position)
+    // type "C" or others = center-aligned
     let justify = '';
-    if (x < -0.5) {
-      justify = 'left'; // Text on left side, anchor at left edge
-    } else if (x > 0.5) {
-      justify = 'right'; // Text on right side, anchor at right edge
+    if (text.type === 'L') {
+      justify = 'left';
+    } else if (text.type === 'R') {
+      justify = 'right';
     }
+    // Default (no justify) = center-aligned
 
     return `\t(fp_text user "${this.escapeString(text.text)}"
 \t\t(at ${x} ${y}${rotation !== 0 ? ` ${rotation}` : ''})
@@ -722,25 +769,127 @@ ${justify ? `\t\t\t(justify ${justify})\n` : ''}\t\t)
   }
 
   /**
-   * Parse SVG path string (M/L/Z commands) to array of points
-   * Format: "M x1,y1 L x2,y2 L x3,y3 Z" or "M x1,y1 L x2,y2 ..."
+   * Parse SVG path string to array of points
+   * Handles M, L, H, V, C, Q, A, Z commands
+   * Curves are simplified to their endpoints (no interpolation)
    */
   private parseSvgPathToPoints(path: string, origin: Point): Point[] {
     const points: Point[] = [];
+    let currentX = 0,
+      currentY = 0;
+    let startX = 0,
+      startY = 0;
 
-    // Match M and L commands with coordinates
-    // Supports both "M425,230" and "M 425 230" formats
-    const commandRegex = /([ML])\s*([\d.-]+)[,\s]+([\d.-]+)/gi;
+    // Match all SVG path commands with their arguments
+    const commandRegex = /([MLHVCSQTAZ])\s*([^MLHVCSQTAZ]*)/gi;
     let match;
 
     while ((match = commandRegex.exec(path)) !== null) {
-      const x = parseFloat(match[2]);
-      const y = parseFloat(match[3]);
+      const cmd = match[1].toUpperCase();
+      const args = match[2]
+        .trim()
+        .split(/[\s,]+/)
+        .map(parseFloat)
+        .filter((n) => !isNaN(n));
 
-      points.push({
-        x: convertX(x, origin.x),
-        y: convertY(y, origin.y),
-      });
+      switch (cmd) {
+        case 'M': // moveto
+          if (args.length >= 2) {
+            currentX = args[0];
+            currentY = args[1];
+            if (points.length === 0) {
+              startX = currentX;
+              startY = currentY;
+            }
+            points.push({
+              x: convertX(currentX, origin.x),
+              y: convertY(currentY, origin.y),
+            });
+          }
+          break;
+        case 'L': // lineto
+          if (args.length >= 2) {
+            currentX = args[0];
+            currentY = args[1];
+            points.push({
+              x: convertX(currentX, origin.x),
+              y: convertY(currentY, origin.y),
+            });
+          }
+          break;
+        case 'H': // horizontal lineto
+          if (args.length >= 1) {
+            currentX = args[0];
+            points.push({
+              x: convertX(currentX, origin.x),
+              y: convertY(currentY, origin.y),
+            });
+          }
+          break;
+        case 'V': // vertical lineto
+          if (args.length >= 1) {
+            currentY = args[0];
+            points.push({
+              x: convertX(currentX, origin.x),
+              y: convertY(currentY, origin.y),
+            });
+          }
+          break;
+        case 'C': // cubic bezier - use endpoint (last 2 args)
+          if (args.length >= 6) {
+            currentX = args[4];
+            currentY = args[5];
+            points.push({
+              x: convertX(currentX, origin.x),
+              y: convertY(currentY, origin.y),
+            });
+          }
+          break;
+        case 'S': // smooth cubic bezier - use endpoint (last 2 args)
+          if (args.length >= 4) {
+            currentX = args[2];
+            currentY = args[3];
+            points.push({
+              x: convertX(currentX, origin.x),
+              y: convertY(currentY, origin.y),
+            });
+          }
+          break;
+        case 'Q': // quadratic bezier - use endpoint (last 2 args)
+          if (args.length >= 4) {
+            currentX = args[2];
+            currentY = args[3];
+            points.push({
+              x: convertX(currentX, origin.x),
+              y: convertY(currentY, origin.y),
+            });
+          }
+          break;
+        case 'T': // smooth quadratic bezier - use endpoint
+          if (args.length >= 2) {
+            currentX = args[0];
+            currentY = args[1];
+            points.push({
+              x: convertX(currentX, origin.x),
+              y: convertY(currentY, origin.y),
+            });
+          }
+          break;
+        case 'A': // arc - use endpoint (last 2 args)
+          if (args.length >= 7) {
+            currentX = args[5];
+            currentY = args[6];
+            points.push({
+              x: convertX(currentX, origin.x),
+              y: convertY(currentY, origin.y),
+            });
+          }
+          break;
+        case 'Z': // closepath - no need to add point, polygon closes automatically
+          currentX = startX;
+          currentY = startY;
+          break;
+      }
     }
 
     return points;

@@ -8,6 +8,7 @@ import { InstallScreen } from './screens/InstallScreen.js';
 import { InstalledScreen } from './screens/InstalledScreen.js';
 import { LibraryScreen } from './screens/LibraryScreen.js';
 import { LibrarySetupScreen } from './screens/LibrarySetupScreen.js';
+import { EasyEDAInfoScreen } from './screens/EasyEDAInfoScreen.js';
 import type { ScreenName, ScreenParams } from './navigation/types.js';
 
 function ScreenRouter() {
@@ -26,6 +27,8 @@ function ScreenRouter() {
       return <LibraryScreen />;
     case 'library-setup':
       return <LibrarySetupScreen />;
+    case 'easyeda-info':
+      return <EasyEDAInfoScreen />;
     default:
       return null;
   }

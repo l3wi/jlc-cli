@@ -38,11 +38,17 @@ const LIBRARY_NAMESPACE = 'jlc_mcp';
 // KiCad versions to check
 const KICAD_VERSIONS = ['9.0', '8.0'];
 
-// EasyEDA community library naming
+// EasyEDA community library naming (global)
 const EASYEDA_LIBRARY_NAME = 'EasyEDA';
 const EASYEDA_SYMBOL_LIBRARY_NAME = 'EasyEDA.kicad_sym';
 const EASYEDA_FOOTPRINT_LIBRARY_NAME = 'EasyEDA.pretty';
 const EASYEDA_LIBRARY_DESCRIPTION = 'EasyEDA Community Component Library';
+
+// EasyEDA community library naming (project-local) - different name to avoid collision
+const EASYEDA_LOCAL_LIBRARY_NAME = 'EasyEDA-local';
+const EASYEDA_LOCAL_SYMBOL_LIBRARY_NAME = 'EasyEDA-local.kicad_sym';
+const EASYEDA_LOCAL_FOOTPRINT_LIBRARY_NAME = 'EasyEDA-local.pretty';
+const EASYEDA_LOCAL_LIBRARY_DESCRIPTION = 'EasyEDA Community Component Library (Project-local)';
 
 export interface InstallOptions {
   projectPath?: string;
@@ -144,6 +150,7 @@ export interface LibraryService {
   update(options?: UpdateOptions): Promise<UpdateResult>;
   ensureGlobalTables(): Promise<void>;
   getStatus(): Promise<LibraryStatus>;
+  isEasyEDAInstalled(componentName: string): Promise<boolean>;
 }
 
 interface LibraryPaths {
@@ -335,13 +342,8 @@ export function createLibraryService(): LibraryService {
     async install(id: string, options: InstallOptions = {}): Promise<InstallResult> {
       const isCommunityComponent = !isLcscId(id);
 
-      // Community components require projectPath
-      if (isCommunityComponent && !options.projectPath) {
-        throw new Error('EasyEDA community components require projectPath for local storage');
-      }
-
-      // Determine storage location
-      const isGlobal = !isCommunityComponent && !options.projectPath;
+      // Determine storage location (global if no projectPath provided)
+      const isGlobal = !options.projectPath;
       const paths = isGlobal
         ? getGlobalLibraryPaths()
         : getProjectLibraryPaths(options.projectPath!);
@@ -397,16 +399,35 @@ export function createLibraryService(): LibraryService {
       let modelPath: string | undefined;
 
       if (isCommunityComponent) {
-        // EasyEDA community component → project-local EasyEDA library
-        const librariesDir = join(options.projectPath!, 'libraries');
-        const symbolsDir = join(librariesDir, 'symbols');
-        footprintDir = join(librariesDir, 'footprints', EASYEDA_FOOTPRINT_LIBRARY_NAME);
-        models3dDir = join(librariesDir, '3dmodels', 'EasyEDA.3dshapes');
+        // EasyEDA community component → EasyEDA library (global or project-local)
+        // Use different library names to avoid collision
+        const libName = isGlobal ? EASYEDA_LIBRARY_NAME : EASYEDA_LOCAL_LIBRARY_NAME;
+        const symLibFile = isGlobal ? EASYEDA_SYMBOL_LIBRARY_NAME : EASYEDA_LOCAL_SYMBOL_LIBRARY_NAME;
+        const fpLibDir = isGlobal ? EASYEDA_FOOTPRINT_LIBRARY_NAME : EASYEDA_LOCAL_FOOTPRINT_LIBRARY_NAME;
+        const libDesc = isGlobal ? EASYEDA_LIBRARY_DESCRIPTION : EASYEDA_LOCAL_LIBRARY_DESCRIPTION;
+        const models3dDirName = isGlobal ? 'EasyEDA.3dshapes' : 'EasyEDA-local.3dshapes';
+
+        let symbolsDir: string;
+        let easyedaModelsDir: string;
+
+        if (isGlobal) {
+          // Global: use KiCad 3rd party directory
+          symbolsDir = paths.symbolsDir;
+          footprintDir = join(paths.footprintsDir, fpLibDir);
+          easyedaModelsDir = join(paths.models3dDir, models3dDirName);
+        } else {
+          // Project-local
+          const librariesDir = join(options.projectPath!, 'libraries');
+          symbolsDir = join(librariesDir, 'symbols');
+          footprintDir = join(librariesDir, 'footprints', fpLibDir);
+          easyedaModelsDir = join(librariesDir, '3dmodels', models3dDirName);
+        }
+        models3dDir = easyedaModelsDir;
 
         await ensureDir(symbolsDir);
         await ensureDir(footprintDir);
 
-        symbolFile = join(symbolsDir, EASYEDA_SYMBOL_LIBRARY_NAME);
+        symbolFile = join(symbolsDir, symLibFile);
         symbolName = component.info.name.replace(/[^a-zA-Z0-9_-]/g, '_');
 
         // Download 3D model first if available (needed for footprint generation)
@@ -421,28 +442,38 @@ export function createLibraryService(): LibraryService {
             const modelFilename = `${symbolName}.step`;
             modelPath = join(models3dDir, modelFilename);
             await writeBinary(modelPath, model);
-            // Use relative path for project-local libraries
-            modelRelativePath = `\${KIPRJMOD}/libraries/3dmodels/EasyEDA.3dshapes/${modelFilename}`;
+            // Use appropriate path variable
+            if (isGlobal) {
+              modelRelativePath = `\${KICAD9_3RD_PARTY}/${LIBRARY_NAMESPACE}/3dmodels/${models3dDirName}/${modelFilename}`;
+            } else {
+              modelRelativePath = `\${KIPRJMOD}/libraries/3dmodels/${models3dDirName}/${modelFilename}`;
+            }
           }
         }
 
         // Generate custom footprint with 3D model
         const footprint = footprintConverter.convert(component, {
-          libraryName: EASYEDA_LIBRARY_NAME,
+          libraryName: libName,
           include3DModel: !!modelRelativePath,
           modelPath: modelRelativePath,
         });
         footprintPath = join(footprintDir, `${symbolName}.kicad_mod`);
-        footprintRef = `${EASYEDA_LIBRARY_NAME}:${symbolName}`;
+        footprintRef = `${libName}:${symbolName}`;
         await writeText(footprintPath, footprint);
 
         component.info.package = footprintRef;
 
-        // Update lib tables
-        await ensureSymLibTable(options.projectPath!, symbolFile, EASYEDA_LIBRARY_NAME, EASYEDA_LIBRARY_DESCRIPTION);
-        await ensureFpLibTable(options.projectPath!, footprintDir, EASYEDA_LIBRARY_NAME, EASYEDA_LIBRARY_DESCRIPTION);
+        // Update lib tables (global or project-local)
+        if (isGlobal) {
+          // For global, use the global lib table registration
+          const { ensureGlobalEasyEDALibrary } = await import('../converter/global-lib-table.js');
+          await ensureGlobalEasyEDALibrary();
+        } else {
+          await ensureSymLibTable(options.projectPath!, symbolFile, libName, libDesc);
+          await ensureFpLibTable(options.projectPath!, footprintDir, libName, libDesc);
+        }
 
-        symbolRef = `${EASYEDA_LIBRARY_NAME}:${symbolName}`;
+        symbolRef = `${libName}:${symbolName}`;
       } else {
         // LCSC component → JLC-MCP category-based library
         category = getLibraryCategory(
@@ -691,6 +722,26 @@ export function createLibraryService(): LibraryService {
           fpLibTable: fpLibTablePath,
         },
       };
+    },
+
+    async isEasyEDAInstalled(componentName: string): Promise<boolean> {
+      const paths = getGlobalLibraryPaths();
+      const easyedaLibPath = join(paths.symbolsDir, EASYEDA_SYMBOL_LIBRARY_NAME);
+
+      if (!existsSync(easyedaLibPath)) {
+        return false;
+      }
+
+      try {
+        const content = await readFile(easyedaLibPath, 'utf-8');
+        // Sanitize the name the same way we do when installing
+        const sanitizedName = componentName.replace(/[^a-zA-Z0-9_-]/g, '_');
+        // Check if symbol exists in library
+        const pattern = new RegExp(`\\(symbol\\s+"${sanitizedName}"`, 'm');
+        return pattern.test(content);
+      } catch {
+        return false;
+      }
     },
   };
 }
