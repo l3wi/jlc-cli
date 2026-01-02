@@ -4,7 +4,7 @@
  */
 
 import { existsSync } from 'fs';
-import { readFile, readdir } from 'fs/promises';
+import { readFile, readdir, unlink } from 'fs/promises';
 import { homedir, platform } from 'os';
 import { join, basename } from 'path';
 
@@ -154,11 +154,24 @@ export interface RegenerateResult {
   components: Array<{ id: string; name: string; status: 'success' | 'failed'; error?: string }>;
 }
 
+export interface RemoveOptions {
+  projectPath?: string;
+}
+
+export interface RemoveResult {
+  success: boolean;
+  lcscId: string;
+  symbolRemoved: boolean;
+  footprintRemoved: boolean;
+  model3dRemoved: boolean;
+}
+
 export interface LibraryService {
   install(id: string, options?: InstallOptions): Promise<InstallResult>;
   listInstalled(options?: ListOptions): Promise<InstalledComponent[]>;
   update(options?: UpdateOptions): Promise<UpdateResult>;
   regenerate(options?: RegenerateOptions): Promise<RegenerateResult>;
+  remove(lcscId: string, options?: RemoveOptions): Promise<RemoveResult>;
   ensureGlobalTables(): Promise<void>;
   getStatus(): Promise<LibraryStatus>;
   isEasyEDAInstalled(componentName: string): Promise<boolean>;
@@ -290,6 +303,53 @@ async function parseSymbolLibrary(
   }
 
   return components;
+}
+
+// Remove a symbol from a .kicad_sym library file
+function removeSymbolFromLibrary(content: string, symbolName: string): string {
+  // Find the main symbol block (not subsymbols like _0_1, _1_1)
+  // Symbol format: (symbol "LibName:SymbolName" ...nested content...)
+  const lines = content.split('\n');
+  const result: string[] = [];
+  let depth = 0;
+  let inTargetSymbol = false;
+  let symbolStartDepth = 0;
+
+  for (const line of lines) {
+    // Count parentheses to track nesting depth
+    const openCount = (line.match(/\(/g) || []).length;
+    const closeCount = (line.match(/\)/g) || []).length;
+
+    // Check if this line starts a symbol we want to remove
+    // Match both "LibName:SymbolName" and just "SymbolName" formats
+    const symbolMatch = line.match(/^\s*\(symbol\s+"([^"]+)"/);
+    if (symbolMatch && !inTargetSymbol) {
+      const fullRef = symbolMatch[1];
+      const nameOnly = fullRef.includes(':') ? fullRef.split(':')[1] : fullRef;
+      // Match main symbol or its subsymbols
+      if (nameOnly === symbolName || nameOnly.startsWith(`${symbolName}_`)) {
+        inTargetSymbol = true;
+        symbolStartDepth = depth;
+        depth += openCount - closeCount;
+        continue; // Skip this line
+      }
+    }
+
+    if (inTargetSymbol) {
+      depth += openCount - closeCount;
+      // Check if we've closed the symbol block
+      if (depth <= symbolStartDepth) {
+        inTargetSymbol = false;
+      }
+      continue; // Skip lines inside the symbol
+    }
+
+    depth += openCount - closeCount;
+    result.push(line);
+  }
+
+  // Clean up extra blank lines
+  return result.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
 function adaptCommunityComponent(component: EasyEDACommunityComponent): EasyEDAComponentData {
@@ -796,6 +856,61 @@ export function createLibraryService(): LibraryService {
       }
 
       return results;
+    },
+
+    async remove(lcscId: string, options: RemoveOptions = {}): Promise<RemoveResult> {
+      const paths = options.projectPath
+        ? getProjectLibraryPaths(options.projectPath)
+        : getGlobalLibraryPaths();
+
+      // Find the component in the installed list
+      const installed = await this.listInstalled({ projectPath: options.projectPath });
+      const component = installed.find(c => c.lcscId === lcscId);
+
+      if (!component) {
+        throw new Error(`Component ${lcscId} not found in library`);
+      }
+
+      const result: RemoveResult = {
+        success: false,
+        lcscId,
+        symbolRemoved: false,
+        footprintRemoved: false,
+        model3dRemoved: false,
+      };
+
+      // Remove symbol from library file
+      const libraryFilename = getLibraryFilename(component.category);
+      const symbolLibPath = join(paths.symbolsDir, libraryFilename);
+
+      if (existsSync(symbolLibPath)) {
+        const content = await readFile(symbolLibPath, 'utf-8');
+        const newContent = removeSymbolFromLibrary(content, component.name);
+        await writeText(symbolLibPath, newContent);
+        result.symbolRemoved = true;
+      }
+
+      // Remove custom footprint if it exists (JLC-MCP: prefix)
+      if (component.footprintRef?.startsWith('JLC-MCP:')) {
+        const fpName = component.footprintRef.split(':')[1];
+        const footprintPath = join(paths.footprintDir, `${fpName}.kicad_mod`);
+        if (existsSync(footprintPath)) {
+          await unlink(footprintPath);
+          result.footprintRemoved = true;
+        }
+      }
+
+      // Remove 3D model if it exists
+      if (component.has3dModel) {
+        const modelPath = join(paths.models3dFullDir, `${component.name}.step`);
+        if (existsSync(modelPath)) {
+          await unlink(modelPath);
+          result.model3dRemoved = true;
+        }
+      }
+
+      result.success = result.symbolRemoved;
+      return result;
     },
   };
 }

@@ -142,8 +142,8 @@ export function DetailView({ component, terminalWidth, isInstalled, installedInf
 
   // Footer text based on installation status
   const footerText = isInstalled
-    ? 'S Symbol • F Footprint • M 3D Model • R Regenerate • D Datasheet • Esc Back'
-    : 'Enter Install • D Datasheet • Esc Back';
+    ? 'R Regenerate • D Delete • O Datasheet • Esc Back'
+    : 'Enter Install • O Datasheet • Esc Back';
 
   return (
     <Box flexDirection="column" width="100%">

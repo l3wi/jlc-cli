@@ -73,37 +73,13 @@ export function InfoScreen() {
   const datasheetUrl = component && ('datasheetPdf' in component ? component.datasheetPdf : 'datasheet' in component ? component.datasheet : undefined);
 
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [regenerateMessage, setRegenerateMessage] = useState<string | null>(null);
 
   useInput((input, key) => {
-    if (isLoading || !component || isCheckingLibrary || isRegenerating) return;
+    if (isLoading || !component || isCheckingLibrary || isRegenerating || isDeleting) return;
 
     const lowerInput = input.toLowerCase();
-
-    // S - Open Symbol in KiCad
-    if (lowerInput === 's' && installedInfo && libraryStatus) {
-      const symbolPath = `${libraryStatus.paths.symbolsDir}/JLC-MCP-${installedInfo.category}.kicad_sym`;
-      open(symbolPath);
-      return;
-    }
-
-    // F - Open Footprint in KiCad
-    if (lowerInput === 'f' && installedInfo && libraryStatus) {
-      if (installedInfo.footprintRef?.startsWith('JLC-MCP:')) {
-        const fpName = installedInfo.footprintRef.split(':')[1];
-        const footprintPath = `${libraryStatus.paths.footprintsDir}/JLC-MCP.pretty/${fpName}.kicad_mod`;
-        open(footprintPath);
-      }
-      // Standard KiCad footprints can't be opened directly
-      return;
-    }
-
-    // M - Open 3D Model
-    if (lowerInput === 'm' && installedInfo && libraryStatus && installedInfo.has3dModel) {
-      const modelPath = `${libraryStatus.paths.models3dDir}/${installedInfo.name}.step`;
-      open(modelPath);
-      return;
-    }
 
     // R - Regenerate symbol and footprint
     if (lowerInput === 'r' && installedInfo) {
@@ -124,8 +100,27 @@ export function InfoScreen() {
       return;
     }
 
-    // D - Open Datasheet
-    if (lowerInput === 'd' && datasheetUrl) {
+    // D - Delete component
+    if (lowerInput === 'd' && installedInfo) {
+      setIsDeleting(true);
+      setRegenerateMessage('Deleting component...');
+
+      libraryService.remove(installedInfo.lcscId)
+        .then(() => {
+          setRegenerateMessage('✓ Component deleted');
+          setInstalledInfo(null);
+          setTimeout(() => setRegenerateMessage(null), 2000);
+        })
+        .catch((err) => {
+          setRegenerateMessage(`✗ Delete failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          setTimeout(() => setRegenerateMessage(null), 3000);
+        })
+        .finally(() => setIsDeleting(false));
+      return;
+    }
+
+    // O - Open Datasheet
+    if (lowerInput === 'o' && datasheetUrl) {
       open(datasheetUrl);
       return;
     }
