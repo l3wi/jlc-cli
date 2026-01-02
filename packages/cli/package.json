@@ -1,6 +1,6 @@
 {
   "name": "@jlcpcb/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
   "description": "CLI for JLC/EasyEDA component sourcing and KiCad library management",

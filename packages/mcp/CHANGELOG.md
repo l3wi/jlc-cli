@@ -1,5 +1,49 @@
 # @jlcpcb/mcp
 
+## 0.3.0
+
+### Minor Changes
+
+- 0.3.0
+
+  Minor Changes
+
+  CLI:
+  - Add component delete functionality with D shortcut in component view
+  - Add O shortcut to open datasheet (replaces D)
+  - Add library regenerate command to regenerate all installed components
+  - Add validation suite for footprint/symbol comparison (jlc validate)
+  - Enable 3D models by default during installation
+  - Remove non-functional S/F/M shortcuts from component view
+
+  Core:
+  - Add symbol text parsing and rendering for connector components
+  - Add arc interpolation for SOLIDREGION polygon paths (improves complex footprint accuracy)
+  - Add remove() method to library service for deleting components
+
+  Patch Changes
+
+  Core:
+  - Strip temperature prefix from component descriptions
+  - Improve hole detection and polygon pad handling in footprint converter
+
+  CLI:
+  - Fix async handling in renderApp exit
+  - Simplify loading indicators
+
+  MCP:
+  - Fix typecheck errors in batch and library tools
+  - Correct validationData property paths
+  - Fix InstalledComponent property access
+
+  Validator:
+  - Align SVG reference extraction with KiCad converter
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @jlcpcb/core@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
