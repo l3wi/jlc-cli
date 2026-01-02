@@ -744,6 +744,14 @@ ${justify ? `\t\t\t(justify ${justify})\n` : ''}\t\t)
    * Parses SVG path with M/L/Z commands and converts to KiCad polygon
    */
   private generateSolidRegion(region: EasyEDASolidRegion, origin: Point): string {
+    // Skip EasyEDA internal layers (99, 100, 101) - these are hidden visual helpers
+    // Layer 99: Component body boundary
+    // Layer 100: Pad/solder mask region boundaries
+    // Layer 101: Internal reference
+    if (region.layerId === 99 || region.layerId === 100 || region.layerId === 101) {
+      return '';
+    }
+
     const layer = getLayer(region.layerId);
     const points = this.parseSvgPathToPoints(region.path, origin);
 
