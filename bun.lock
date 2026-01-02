@@ -14,7 +14,7 @@
     },
     "packages/cli": {
       "name": "@jlcpcb/cli",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "jlc": "./dist/index.js",
       },
@@ -26,6 +26,7 @@
         "ink": "6.6.0",
         "ink-select-input": "6.2.0",
         "open": "11.0.0",
+        "react": "^19.0.0",
         "react-devtools-core": "7.0.1",
       },
       "devDependencies": {
@@ -35,7 +36,7 @@
     },
     "packages/core": {
       "name": "@jlcpcb/core",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "zod": "^3.22.0",
       },
@@ -45,7 +46,7 @@
     },
     "packages/mcp": {
       "name": "@jlcpcb/mcp",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "jlc-mcp": "./dist/index.js",
       },

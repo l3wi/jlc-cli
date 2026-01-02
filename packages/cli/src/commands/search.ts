@@ -30,7 +30,7 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
 
     // Clear the "Searching..." line and launch interactive UI
     process.stdout.write('\x1b[1A\x1b[2K');
-    renderApp('search', { query, results });
+    await renderApp('search', { query, results });
   } catch (error) {
     console.error(`Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     process.exit(1);

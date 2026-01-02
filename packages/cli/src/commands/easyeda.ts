@@ -111,7 +111,7 @@ export async function easyedaInstallCommand(
   // If UUID provided (without --force), launch TUI to fetch and display
   if (uuid) {
     // Launch TUI at EasyEDA info screen - let it fetch the component
-    renderApp('easyeda-info', { uuid })
+    await renderApp('easyeda-info', { uuid })
     return
   }
 
@@ -130,8 +130,7 @@ export async function easyedaInstallCommand(
     process.exit(0)
   }
 
-  const spinner = p.spinner()
-  spinner.start(`Searching EasyEDA community for "${query}"...`)
+  console.log(`Searching EasyEDA community for "${query}"...`)
 
   const searchOptions: SearchOptions = {
     limit: 20,
@@ -139,13 +138,12 @@ export async function easyedaInstallCommand(
   }
   const results = await componentService.search(query as string, searchOptions)
 
-  spinner.stop(`Found ${results.length} results`)
-
   if (results.length === 0) {
-    p.log.warn('No components found. Try a different search term.')
+    console.log('No components found. Try a different search term.')
     return
   }
 
-  // Launch TUI for selection and install
-  renderApp('search', { query: query as string, results })
+  // Clear the "Searching..." line and launch interactive UI
+  process.stdout.write('\x1b[1A\x1b[2K')
+  await renderApp('search', { query: query as string, results })
 }

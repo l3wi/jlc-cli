@@ -33,5 +33,5 @@ export async function infoCommand(id: string, options: InfoOptions): Promise<voi
   }
 
   // Interactive mode - launch TUI
-  renderApp('info', { componentId: id });
+  await renderApp('info', { componentId: id });
 }

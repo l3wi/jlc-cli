@@ -83,5 +83,9 @@ export function useNavigation(): NavigationContextValue {
 
 export function useCurrentScreen(): HistoryEntry {
   const { history, currentIndex } = useNavigation();
-  return history[currentIndex];
+  const entry = history[currentIndex];
+  if (!entry) {
+    throw new Error(`Invalid navigation state: currentIndex=${currentIndex}, history.length=${history.length}`);
+  }
+  return entry;
 }

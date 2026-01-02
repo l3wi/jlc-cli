@@ -80,9 +80,10 @@ export function App<T extends ScreenName>({ initialScreen, initialParams }: AppP
   );
 }
 
-export function renderApp<T extends ScreenName>(
+export async function renderApp<T extends ScreenName>(
   initialScreen: T,
   initialParams: ScreenParams[T]
-): void {
-  render(<App initialScreen={initialScreen} initialParams={initialParams} />);
+): Promise<void> {
+  const instance = render(<App initialScreen={initialScreen} initialParams={initialParams} />);
+  await instance.waitUntilExit();
 }

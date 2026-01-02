@@ -68,18 +68,15 @@ export async function installCommand(id: string | undefined, options: InstallOpt
 
   // If ID provided (without --force), fetch component and launch TUI for install
   if (id) {
-    const spinner = p.spinner();
-    spinner.start(`Fetching component ${id}...`);
+    console.log(`Fetching component ${id}...`);
 
     try {
       const details = await componentService.getDetails(id);
-      spinner.stop('Component found');
-
-      // Launch TUI at info screen (user can navigate to install from there)
-      renderApp('info', { componentId: id, component: details as any });
+      // Clear the "Fetching..." line and launch interactive UI
+      process.stdout.write('\x1b[1A\x1b[2K');
+      await renderApp('info', { componentId: id, component: details as any });
     } catch (error) {
-      spinner.stop('Failed to fetch component');
-      p.log.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`Failed to fetch component: ${error instanceof Error ? error.message : 'Unknown error'}`);
       process.exit(1);
     }
     return;
@@ -100,8 +97,7 @@ export async function installCommand(id: string | undefined, options: InstallOpt
     process.exit(0);
   }
 
-  const spinner = p.spinner();
-  spinner.start(`Searching for "${query}"...`);
+  console.log(`Searching for "${query}"...`);
 
   const searchOptions: SearchOptions = { limit: 20 };
   let results = await componentService.search(query as string, searchOptions);
@@ -113,13 +109,12 @@ export async function installCommand(id: string | undefined, options: InstallOpt
     return 0;
   });
 
-  spinner.stop(`Found ${results.length} results`);
-
   if (results.length === 0) {
-    p.log.warn('No components found. Try a different search term.');
+    console.log('No components found. Try a different search term.');
     return;
   }
 
-  // Launch TUI for selection and install
-  renderApp('search', { query: query as string, results });
+  // Clear the "Searching..." line and launch interactive UI
+  process.stdout.write('\x1b[1A\x1b[2K');
+  await renderApp('search', { query: query as string, results });
 }
