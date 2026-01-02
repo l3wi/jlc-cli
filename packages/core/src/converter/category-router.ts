@@ -37,6 +37,7 @@ const PREFIX_CATEGORY_MAP: Record<string, LibraryCategory> = {
   X: 'Crystals',
   J: 'Connectors',
   P: 'Connectors',
+  RJ: 'Connectors', // RJ45, RJ11, etc.
   K: 'Misc', // Relays
   F: 'Misc', // Fuses
 };
@@ -285,6 +286,49 @@ const CATEGORY_KEYWORD_RULES: Array<{ category: LibraryCategory; keywords: strin
       'ceramic resonator',
     ],
   },
+  // Connectors - check before Diodes to avoid "With LED" triggering Diodes category
+  {
+    category: 'Connectors',
+    keywords: [
+      'connector',
+      'header',
+      'socket',
+      'terminal',
+      'terminal block',
+      'jack',
+      'plug',
+      'receptacle',
+      'usb-c',
+      'usb type-c',
+      'micro usb',
+      'mini usb',
+      'usb-a',
+      'usb-b',
+      'hdmi connector',
+      'rj45',
+      'rj11',
+      'barrel jack',
+      'dc jack',
+      'audio jack',
+      'jst',
+      'jst-xh',
+      'jst-ph',
+      'molex',
+      'dupont',
+      'pin header',
+      'female header',
+      'fpc',
+      'ffc',
+      'sim card',
+      'sd card',
+      'microsd',
+      'pogo pin',
+      'spring contact',
+      'test point',
+      'ethernet connector',
+      'modular connector',
+    ],
+  },
   // Less specific categories - checked after more specific ones
   {
     category: 'Transistors',
@@ -384,46 +428,6 @@ const CATEGORY_KEYWORD_RULES: Array<{ category: LibraryCategory; keywords: strin
       'shunt resistor',
       'current sense resistor',
       'chip resistor',
-    ],
-  },
-  {
-    category: 'Connectors',
-    keywords: [
-      'connector',
-      'header',
-      'socket',
-      'terminal',
-      'terminal block',
-      'jack',
-      'plug',
-      'receptacle',
-      'usb-c',
-      'usb type-c',
-      'micro usb',
-      'mini usb',
-      'usb-a',
-      'usb-b',
-      'hdmi connector',
-      'rj45',
-      'rj11',
-      'barrel jack',
-      'dc jack',
-      'audio jack',
-      'jst',
-      'jst-xh',
-      'jst-ph',
-      'molex',
-      'dupont',
-      'pin header',
-      'female header',
-      'fpc',
-      'ffc',
-      'sim card',
-      'sd card',
-      'microsd',
-      'pogo pin',
-      'spring contact',
-      'test point',
     ],
   },
   // Catch-all for remaining ICs - must be last
@@ -534,9 +538,21 @@ export function getLibraryCategory(
   description?: string
 ): LibraryCategory {
   // 1. Check prefix first (most reliable for passives)
-  const normalizedPrefix = prefix.toUpperCase();
-  if (PREFIX_CATEGORY_MAP[normalizedPrefix]) {
-    return PREFIX_CATEGORY_MAP[normalizedPrefix];
+  // Clean prefix: remove trailing ? and other non-alphanumeric chars, uppercase
+  const cleanedPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+
+  // Check multi-character prefixes first (RJ, FB), then single char
+  // This ensures "RJ?" matches "RJ" → Connectors, not falling through
+  if (cleanedPrefix.length >= 2) {
+    const twoCharPrefix = cleanedPrefix.slice(0, 2);
+    if (PREFIX_CATEGORY_MAP[twoCharPrefix]) {
+      return PREFIX_CATEGORY_MAP[twoCharPrefix];
+    }
+  }
+  // Check single character prefix
+  const singleCharPrefix = cleanedPrefix.slice(0, 1);
+  if (PREFIX_CATEGORY_MAP[singleCharPrefix]) {
+    return PREFIX_CATEGORY_MAP[singleCharPrefix];
   }
 
   // 2. Combine category and description for keyword search

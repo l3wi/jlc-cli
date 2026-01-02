@@ -128,6 +128,7 @@ export class EasyEDAClient {
         polylines: symbolData.polylines,
         polygons: symbolData.polygons,
         paths: symbolData.paths,
+        texts: symbolData.texts,
         origin: symbolOrigin,
       },
       footprint: {

@@ -315,6 +315,7 @@ function adaptCommunityComponent(component: EasyEDACommunityComponent): EasyEDAC
       polylines: component.symbol.polylines,
       polygons: component.symbol.polygons,
       paths: component.symbol.paths,
+      texts: component.symbol.texts || [],
       origin: component.symbol.origin,
     },
     footprint: {

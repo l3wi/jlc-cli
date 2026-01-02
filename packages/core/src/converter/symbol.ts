@@ -14,6 +14,7 @@ import type {
   EasyEDASymbolPolyline,
   EasyEDASymbolPolygon,
   EasyEDASymbolPath,
+  EasyEDASymbolText,
 } from '../types/index.js';
 import { KICAD_SYMBOL_VERSION, KICAD_DEFAULTS } from '../constants/index.js';
 import { roundTo } from '../utils/index.js';
@@ -162,6 +163,13 @@ export class SymbolConverter {
    * Check if symbol has shapes worth rendering (not just pins)
    */
   private hasRenderableShapes(symbol: EasyEDASymbolData): boolean {
+    // Check for decorative text elements (not pin name labels like Jn/...)
+    const pinNamePattern = /^J\d+(?:\/|$)/i;
+    const hasDecorativeText = (symbol.texts || []).some(t => {
+      const text = t.text.trim();
+      return text && !pinNamePattern.test(text);
+    });
+
     return (
       symbol.rectangles.length > 0 ||
       symbol.circles.length > 0 ||
@@ -169,7 +177,8 @@ export class SymbolConverter {
       symbol.polylines.length > 0 ||
       symbol.polygons.length > 0 ||
       symbol.arcs.length > 0 ||
-      symbol.paths.length > 0
+      symbol.paths.length > 0 ||
+      hasDecorativeText
     );
   }
 
@@ -212,6 +221,20 @@ export class SymbolConverter {
     for (const path of symbol.paths) {
       const pathOutput = this.convertPath(path, origin);
       if (pathOutput) output += pathOutput;
+    }
+
+    // Render decorative text elements as symbol graphics
+    // Filter out texts that were used for pin name association (Jn/... pattern)
+    const pinNamePattern = /^J\d+(?:\/|$)/i;
+    const decorativeTexts = (symbol.texts || []).filter(t => {
+      const text = t.text.trim();
+      if (!text) return false;
+      // Skip texts that match the Jn/... pattern (used for pin names)
+      return !pinNamePattern.test(text);
+    });
+    for (const text of decorativeTexts) {
+      const textOutput = this.convertText(text, origin);
+      if (textOutput) output += textOutput;
     }
 
     output += `\t\t)\n`;
@@ -446,6 +469,36 @@ export class SymbolConverter {
     output += `\t\t\t)\n`;
 
     return output;
+  }
+
+  /**
+   * Convert EasyEDA text to KiCad format
+   * Renders decorative text labels inside the symbol
+   */
+  private convertText(text: EasyEDASymbolText, origin: { x: number; y: number }): string | null {
+    if (!text.text || text.text.trim() === '') return null;
+
+    const x = this.convertX(text.x, origin.x);
+    const y = this.convertY(text.y, origin.y);
+
+    // Convert font size (EasyEDA uses pts, default ~7)
+    const fontSize = roundTo(Math.max(text.fontSize * EE_TO_MM * 0.8, 0.5), 3);
+
+    // Convert rotation (EasyEDA rotation with Y-flip)
+    const rotation = ((360 - text.rotation) % 360);
+
+    // Sanitize text content
+    const content = text.text.replace(/"/g, "'").replace(/\\/g, '');
+
+    return `\t\t\t(text "${content}"
+\t\t\t\t(at ${x} ${y} ${rotation})
+\t\t\t\t(effects
+\t\t\t\t\t(font
+\t\t\t\t\t\t(size ${fontSize} ${fontSize})
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t)
+`;
   }
 
   /**

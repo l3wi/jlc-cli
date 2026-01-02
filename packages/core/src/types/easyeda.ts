@@ -140,6 +140,23 @@ export interface EasyEDASymbolPath {
 }
 
 /**
+ * Symbol Text element
+ * Format: T~alignment~x~y~rotation~color~~fontSize~...~type~text~...~id~...~pinpart
+ * Used for pin labels, reference designators, and decorative text
+ */
+export interface EasyEDASymbolText {
+  x: number;
+  y: number;
+  rotation: number;
+  fontSize: number;
+  text: string;
+  color: string;
+  textType: string;      // "comment", "N" (name), etc.
+  isPinPart: boolean;    // true if this text is a pin-related label
+  id: string;
+}
+
+/**
  * Complete symbol data with all shape types
  */
 export interface EasyEDASymbolData {
@@ -151,6 +168,7 @@ export interface EasyEDASymbolData {
   polylines: EasyEDASymbolPolyline[];
   polygons: EasyEDASymbolPolygon[];
   paths: EasyEDASymbolPath[];
+  texts: EasyEDASymbolText[];
   origin: { x: number; y: number };
 }
 

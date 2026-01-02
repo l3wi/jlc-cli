@@ -18,6 +18,7 @@ import type {
   EasyEDASymbolPolyline,
   EasyEDASymbolPolygon,
   EasyEDASymbolPath,
+  EasyEDASymbolText,
   ParsedSymbolData,
   // Footprint shape types
   EasyEDAPad,
@@ -226,6 +227,50 @@ export function parseSymbolPath(data: string): EasyEDASymbolPath | null {
       strokeColor: f[2] || '#000000',
       strokeWidth: safeParseFloat(f[3], 1),
       fillColor: f[5] || 'none',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse symbol Text element
+ * Format: T~alignment~x~y~rotation~color~~fontSize~...~type~text~...~id~...~pinpart
+ *
+ * Example: T~L~485~283~0~#8D2323~~7~ ~ ~ ~comment~J1/T+~1~start~gge40~0~pinpart
+ * Fields:
+ *  [0]: T - marker
+ *  [1]: L - alignment (L=left, R=right, C=center)
+ *  [2]: x position
+ *  [3]: y position
+ *  [4]: rotation
+ *  [5]: color
+ *  [6]: (empty)
+ *  [7]: fontSize
+ *  [8-10]: spacers
+ *  [11]: type ("comment", "N" for name, etc.)
+ *  [12]: actual text content
+ *  [13-14]: display flags
+ *  [15]: id
+ *  [16]: locked
+ *  [17]: "pinpart" if this is a pin-related label
+ */
+export function parseSymbolText(data: string): EasyEDASymbolText | null {
+  try {
+    const f = data.split('~');
+    // Check if this is a pinpart label (last field is "pinpart")
+    const isPinPart = f[f.length - 1] === 'pinpart' || f.some(field => field === 'pinpart');
+
+    return {
+      x: safeParseFloat(f[2]),
+      y: safeParseFloat(f[3]),
+      rotation: safeParseFloat(f[4]),
+      color: f[5] || '#000000',
+      fontSize: safeParseFloat(f[7], 7),
+      textType: f[11] || '',
+      text: f[12] || '',
+      id: f[15] || f[13] || '', // ID position varies
+      isPinPart,
     };
   } catch {
     return null;
@@ -457,6 +502,7 @@ export function parseSymbolShapes(shapes: string[]): ParsedSymbolData {
   const polylines: EasyEDASymbolPolyline[] = [];
   const polygons: EasyEDASymbolPolygon[] = [];
   const paths: EasyEDASymbolPath[] = [];
+  const texts: EasyEDASymbolText[] = [];
 
   for (const line of shapes) {
     if (typeof line !== 'string') continue;
@@ -504,11 +550,16 @@ export function parseSymbolShapes(shapes: string[]): ParsedSymbolData {
         if (path) paths.push(path);
         break;
       }
-      case 'T':
-        // Text elements - skip (we have our own text placement)
+      case 'T': {
+        const text = parseSymbolText(line);
+        if (text && text.text.trim()) texts.push(text);
         break;
+      }
     }
   }
+
+  // Post-process: associate pinpart texts with pins to extract names
+  associatePinNamesFromTexts(pins, texts);
 
   return {
     pins,
@@ -519,7 +570,48 @@ export function parseSymbolShapes(shapes: string[]): ParsedSymbolData {
     polylines,
     polygons,
     paths,
+    texts,
   };
+}
+
+/**
+ * Associate pinpart text labels with pins to extract descriptive names
+ * Looks for patterns like "J1/T+" → pin 1, "J2/T-" → pin 2
+ * Also handles format "1CT:1" (center tap), "Green/Yellow" (LED colors)
+ */
+function associatePinNamesFromTexts(pins: EasyEDAPin[], texts: EasyEDASymbolText[]): void {
+  // Get pinpart texts only
+  const pinpartTexts = texts.filter(t => t.isPinPart && t.text.trim());
+
+  for (const text of pinpartTexts) {
+    const textContent = text.text.trim();
+
+    // Try to match "Jn" or "Jn/..." pattern (common for connectors)
+    // Examples: "J1/T+", "J2/T-", "J3/R+", "J4", "J5"
+    const jMatch = textContent.match(/^J(\d+)(?:\/(.+))?$/i);
+    if (jMatch) {
+      const pinNum = jMatch[1];
+      const pinFunction = jMatch[2] || textContent; // Use full text if no function suffix
+
+      // Find the pin with this number
+      const pin = pins.find(p => p.number === pinNum);
+      if (pin && (!pin.name || pin.name === pinNum)) {
+        // Set the pin name to the descriptive function (e.g., "T+" for TX+, or full "J1/T+")
+        pin.name = pinFunction || textContent;
+      }
+      continue;
+    }
+
+    // Try to match just a number (for simple numbered pins)
+    const numMatch = textContent.match(/^(\d+)$/);
+    if (numMatch) {
+      // Don't override - this is just a pin number, not a name
+      continue;
+    }
+
+    // For other patterns like "1CT:1", "Green", "Yellow", etc.
+    // These are decorative labels, not pin names - skip them
+  }
 }
 
 /**

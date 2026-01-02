@@ -230,6 +230,7 @@ export class EasyEDACommunityClient {
         polylines: symbolData.polylines,
         polygons: symbolData.polygons,
         paths: symbolData.paths,
+        texts: symbolData.texts,
         origin: symbolOrigin,
         head: dataStr.head || {},
       },
