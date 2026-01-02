@@ -70,7 +70,7 @@ export async function handleLibraryBatchInstall(args: unknown) {
       });
 
       // Check if it was actually installed or already existed
-      if (result.symbolAction === 'skipped') {
+      if (result.symbolAction === 'exists') {
         return {
           id,
           status: 'skipped',
