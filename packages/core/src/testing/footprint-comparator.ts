@@ -82,9 +82,8 @@ export function extractFromReferenceSVG(svg: string): FootprintData {
   }
 
   // Normalize coordinates: center the footprint at (0,0) like KiCad does
-  // Calculate centroid from all pads (same method KiCad converter uses)
-  const allPadPoints = rawPads.map((p) => ({ x: p.x, y: p.y }));
-  const centroid = calculateCentroid(allPadPoints);
+  // Use bounding box center (including pad dimensions) to match KiCad converter
+  const centroid = calculateBoundingBoxCenter(rawPads);
 
   // Apply offset to all elements
   const pads = rawPads.map((p) => ({
@@ -118,7 +117,8 @@ export function extractFromReferenceSVG(svg: string): FootprintData {
 }
 
 /**
- * Calculate centroid from a set of points
+ * Calculate centroid from a set of points (simple average)
+ * @deprecated Use calculateBoundingBoxCenter for pad-based centering
  */
 function calculateCentroid(points: Array<{ x: number; y: number }>): { x: number; y: number } {
   if (points.length === 0) {
@@ -133,6 +133,35 @@ function calculateCentroid(points: Array<{ x: number; y: number }>): { x: number
   return {
     x: sum.x / points.length,
     y: sum.y / points.length,
+  };
+}
+
+/**
+ * Calculate bounding box center from pads, including pad dimensions
+ * This matches the method used by the KiCad footprint converter
+ */
+function calculateBoundingBoxCenter(pads: PadInfo[]): { x: number; y: number } {
+  if (pads.length === 0) {
+    return { x: 0, y: 0 };
+  }
+
+  let minX = Infinity,
+    maxX = -Infinity;
+  let minY = Infinity,
+    maxY = -Infinity;
+
+  for (const pad of pads) {
+    const hw = pad.width / 2;
+    const hh = pad.height / 2;
+    minX = Math.min(minX, pad.x - hw);
+    maxX = Math.max(maxX, pad.x + hw);
+    minY = Math.min(minY, pad.y - hh);
+    maxY = Math.max(maxY, pad.y + hh);
+  }
+
+  return {
+    x: (minX + maxX) / 2,
+    y: (minY + maxY) / 2,
   };
 }
 
@@ -183,7 +212,7 @@ function parsePadGroup(groupTag: string, groupContent: string): PadInfo | null {
 
   const [xStr, yStr] = originMatch[1].split(',');
   const x = parseFloat(xStr) * EE_TO_MM;
-  const y = -parseFloat(yStr) * EE_TO_MM; // Y is inverted in SVG
+  const y = parseFloat(yStr) * EE_TO_MM; // KiCad uses same Y convention as EasyEDA (Y-down)
 
   // Extract layer ID
   const layerMatch = groupTag.match(/layerid="(\d+)"/);
@@ -313,7 +342,7 @@ function parseViaGroup(groupTag: string, groupContent: string): ViaInfo | null {
 
   const [xStr, yStr] = originMatch[1].split(',');
   const x = parseFloat(xStr) * EE_TO_MM;
-  const y = -parseFloat(yStr) * EE_TO_MM;
+  const y = parseFloat(yStr) * EE_TO_MM; // KiCad uses same Y convention as EasyEDA
 
   // Extract outer and inner diameter from circles
   const circles = [...groupContent.matchAll(/<circle[^>]*r="([^"]+)"[^>]*>/g)];
@@ -336,7 +365,7 @@ function parseHoleGroup(groupTag: string, groupContent: string): HoleInfo | null
 
   const [xStr, yStr] = originMatch[1].split(',');
   const x = parseFloat(xStr) * EE_TO_MM;
-  const y = -parseFloat(yStr) * EE_TO_MM;
+  const y = parseFloat(yStr) * EE_TO_MM; // KiCad uses same Y convention as EasyEDA
 
   // Extract diameter from circle
   const circleMatch = groupContent.match(/<circle[^>]*r="([^"]+)"[^>]*>/);
