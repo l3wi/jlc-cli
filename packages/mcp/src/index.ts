@@ -11,6 +11,7 @@
  * EasyEDA (owned by JLC/LCSC) provides the symbol and footprint data.
  */
 
+import { createRequire } from 'module';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -21,13 +22,16 @@ import {
 import { tools, toolHandlers } from './tools/index.js';
 import { createLogger, ensureGlobalLibraryTables, startHttpServer } from '@jlcpcb/core';
 
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json');
+
 const logger = createLogger('jlc-mcp');
 
 // Create MCP server
 const server = new Server(
   {
     name: 'jlc-mcp',
-    version: '0.1.0',
+    version,
   },
   {
     capabilities: {

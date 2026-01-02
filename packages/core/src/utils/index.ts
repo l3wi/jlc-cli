@@ -6,3 +6,4 @@ export * from './conversion.js';
 export * from './validation.js';
 export * from './file-system.js';
 export * from './logger.js';
+export * from './kicad.js';

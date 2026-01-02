@@ -97,7 +97,17 @@ export function renderSymbolSvg(sexpr: string): string {
   }
 
   try {
-    const parsed = parseSExpr(sexpr)
+    let parsed = parseSExpr(sexpr)
+
+    // Handle kicad_symbol_lib wrapper - extract the first symbol
+    if (isList(parsed) && getTag(parsed) === 'kicad_symbol_lib') {
+      const symbols = findChildren(parsed, 'symbol')
+      if (symbols.length === 0) {
+        return createErrorSvg('No symbol found in library')
+      }
+      parsed = symbols[0]
+    }
+
     if (!isList(parsed) || getTag(parsed) !== 'symbol') {
       return createErrorSvg('Invalid symbol format')
     }

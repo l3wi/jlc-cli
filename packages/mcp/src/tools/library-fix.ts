@@ -19,27 +19,10 @@ import {
   getFootprintReference as getCategoryFootprintRef,
   ensureDir,
   writeText,
+  detectKicadVersion,
   type EasyEDAPin,
 } from '@jlcpcb/core';
 import { join } from 'path';
-
-// KiCad versions to check (newest first)
-const KICAD_VERSIONS = ['9.0', '8.0'];
-
-/**
- * Detect KiCad major version from existing user directories
- */
-function detectKicadVersion(): string {
-  const home = homedir();
-  const baseDir = join(home, 'Documents', 'KiCad');
-
-  for (const version of KICAD_VERSIONS) {
-    if (existsSync(join(baseDir, version))) {
-      return version;
-    }
-  }
-  return '9.0'; // Default
-}
 
 /**
  * Get library paths for fix operation

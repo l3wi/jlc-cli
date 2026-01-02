@@ -12,7 +12,7 @@ export interface SearchOptions {
   limit?: number;
   inStock?: boolean;
   basicOnly?: boolean;
-  source?: 'lcsc' | 'easyeda-community' | 'all';
+  source?: 'lcsc' | 'community' | 'easyeda-community' | 'all';
 }
 
 export interface ComponentDetails {
@@ -47,7 +47,7 @@ export function createComponentService(): ComponentService {
     async search(query: string, options: SearchOptions = {}): Promise<ComponentSearchResult[]> {
       const { source = 'lcsc', limit = 20, inStock, basicOnly } = options;
 
-      if (source === 'easyeda-community') {
+      if (source === 'community' || source === 'easyeda-community') {
         const results = await easyedaCommunityClient.search({
           query,
           limit,

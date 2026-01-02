@@ -4,8 +4,31 @@
 
 import { z } from 'zod';
 
-// Component validation schemas
+// Component ID validation schemas
 export const LCSCPartNumberSchema = z.string().regex(/^C\d+$/, 'Invalid LCSC part number format (expected C followed by digits)');
+
+/**
+ * EasyEDA community component UUID validation
+ * Format: 32-character hex string (case-insensitive, normalized to lowercase)
+ */
+export const EasyEDAUuidSchema = z
+  .string()
+  .regex(/^[a-f0-9]{32}$/i, 'Invalid EasyEDA UUID (expected 32-character hex string)')
+  .transform((s) => s.toLowerCase());
+
+/**
+ * Component ID that accepts either LCSC part number or EasyEDA UUID
+ */
+export const ComponentIdSchema = z.union([LCSCPartNumberSchema, EasyEDAUuidSchema]);
+
+/**
+ * Safe path validation - prevents path traversal attacks
+ */
+export const SafePathSchema = z
+  .string()
+  .min(1, 'Path cannot be empty')
+  .refine((p) => !p.includes('..'), 'Path traversal (..) not allowed')
+  .refine((p) => !p.includes('\0'), 'Null bytes not allowed in path');
 
 export const PackageSchema = z.string().min(1, 'Package cannot be empty');
 
@@ -96,6 +119,14 @@ export const KiCadPadShapeSchema = z.enum([
 // Validation helper functions
 export function validateLCSCPartNumber(partNumber: string): boolean {
   return LCSCPartNumberSchema.safeParse(partNumber).success;
+}
+
+export function isLcscId(id: string): boolean {
+  return LCSCPartNumberSchema.safeParse(id).success;
+}
+
+export function isEasyEDAUuid(id: string): boolean {
+  return EasyEDAUuidSchema.safeParse(id).success;
 }
 
 export function validateComponent(component: unknown): boolean {

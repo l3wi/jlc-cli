@@ -76,27 +76,17 @@ bun run build
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `component_search` | Search JLCPCB parts database | `query`, `in_stock`, `basic_only`, `limit` |
-| `component_get` | Get detailed component info by LCSC ID | `lcsc_id` (e.g., "C2040") |
+| `component_search` | Search JLCPCB parts or EasyEDA community | `query`, `source`, `in_stock`, `basic_only`, `limit` |
 
 ### Library Management
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `library_fetch` | Fetch component and add to KiCad library | `lcsc_id`, `project_path`?, `include_3d`? |
-| `library_get_symbol` | Get raw KiCad symbol data | `lcsc_id` |
-| `library_get_footprint` | Get raw KiCad footprint data | `lcsc_id` |
-| `library_get_3d_model` | Download 3D model | `uuid`, `format` |
-| `library_update` | Initialize or regenerate all components | `project_path`?, `dry_run`? |
-
-### EasyEDA Community Library
-
-| Tool | Description | Key Parameters |
-|------|-------------|----------------|
-| `easyeda_search` | Search community-contributed components | `query`, `source`, `open_preview` |
-| `easyeda_get` | Get community component details | `uuid` |
-| `easyeda_fetch` | Fetch community component to project | `uuid`, `project_path`, `include_3d` |
-| `easyeda_get_3d_model` | Download community 3D model | `uuid`, `format` |
+| `library_install` | Install component to KiCad library | `id`, `project_path`?, `include_3d`?, `force`? |
+| `library_batch_install` | Install up to 10 components at once | `ids`, `include_3d`?, `force`? |
+| `library_get_component` | Get installed component metadata | `id` (LCSC ID) |
+| `library_update` | Regenerate all components with latest data | `project_path`?, `dry_run`? |
+| `library_fix` | Apply pin corrections to a component | `id`, `corrections` |
 
 ## Usage Examples
 
@@ -108,23 +98,31 @@ component_search(query="STM32F103", in_stock=true, basic_only=true)
 
 Returns matching components with LCSC IDs, stock levels, and pricing.
 
-### Fetch to global library
+### Install a component
 
 ```
-library_fetch(lcsc_id="C8734")
+library_install(id="C8734")
 ```
 
 Downloads the component and returns:
 - `symbol_ref`: Reference for schematic (e.g., `JLC-MCP-ICs:STM32F103C8T6`)
 - `footprint_ref`: Reference for PCB (e.g., `Package_QFP:LQFP-48_7x7mm_P0.5mm`)
 
-### Fetch to project-local library
+### Install to project-local library
 
 ```
-library_fetch(lcsc_id="C8734", project_path="/path/to/kicad/project", include_3d=true)
+library_install(id="C8734", project_path="/path/to/kicad/project", include_3d=true)
 ```
 
-### Initialize libraries
+### Batch install components
+
+```
+library_batch_install(ids=["C2040", "C5446", "C14663"])
+```
+
+Install multiple components in parallel (up to 10 at once).
+
+### Regenerate libraries
 
 ```
 library_update()
@@ -134,14 +132,6 @@ Creates the category-based library structure if it doesn't exist:
 - Creates `JLC-MCP-Resistors.kicad_sym`, `JLC-MCP-Capacitors.kicad_sym`, etc.
 - Creates `JLC-MCP.pretty/` footprint directory
 - Creates `JLC-MCP.3dshapes/` 3D model directory
-
-### Search EasyEDA community
-
-```
-easyeda_search(query="XIAO RP2040", open_preview=true)
-```
-
-Opens an HTML preview in your browser with symbol/footprint thumbnails.
 
 ## Library Organization
 

@@ -1,22 +1,22 @@
 /**
- * MCP tool definitions and handlers for LCSC MCP server
+ * MCP tool definitions and handlers for JLC-MCP server
+ * Streamlined version with 6 consolidated tools
  */
 
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
-// Import LCSC tools
-import { searchComponentsTool, handleSearchComponents } from './search.js';
-import { getComponentTool, handleGetComponent } from './details.js';
+// Import tools
+import { componentSearchTool, handleComponentSearch } from './search.js';
 import {
-  getSymbolKicadTool,
-  getFootprintKicadTool,
-  fetchLibraryTool,
-  get3DModelTool,
-  handleGetSymbolKicad,
-  handleGetFootprintKicad,
-  handleFetchLibrary,
-  handleGet3DModel,
+  libraryInstallTool,
+  libraryGetComponentTool,
+  handleLibraryInstall,
+  handleLibraryGetComponent,
 } from './library.js';
+import {
+  libraryBatchInstallTool,
+  handleLibraryBatchInstall,
+} from './batch.js';
 import {
   updateLibraryTool,
   handleUpdateLibrary,
@@ -26,62 +26,41 @@ import {
   handleFixLibrary,
 } from './library-fix.js';
 
-// Import EasyEDA community tools
-import {
-  easyedaSearchTool,
-  easyedaGet3DModelTool,
-  handleEasyedaSearch,
-  handleEasyedaGet3DModel,
-} from './easyeda.js';
-
-// Export all tool definitions
+// Export all tool definitions (6 tools total)
 export const tools: Tool[] = [
-  // LCSC/JLCPCB official library
-  searchComponentsTool,
-  getComponentTool,
-  getSymbolKicadTool,
-  getFootprintKicadTool,
-  fetchLibraryTool,
-  updateLibraryTool,
-  fixLibraryTool,
-  get3DModelTool,
-  // EasyEDA community library
-  easyedaSearchTool,
-  easyedaGet3DModelTool,
+  componentSearchTool,       // Search LCSC or EasyEDA community
+  libraryInstallTool,        // Install single component
+  libraryBatchInstallTool,   // Install up to 10 components
+  libraryGetComponentTool,   // Get installed component metadata
+  updateLibraryTool,         // Regenerate all components
+  fixLibraryTool,            // Apply pin corrections
 ];
 
-// Tool handler map
+// Tool handler map - derived from tool definitions to prevent name mismatches
 export const toolHandlers: Record<string, (args: unknown) => Promise<{
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
 }>> = {
-  // LCSC/JLCPCB official library
-  component_search: handleSearchComponents,
-  component_get: handleGetComponent,
-  library_get_symbol: handleGetSymbolKicad,
-  library_get_footprint: handleGetFootprintKicad,
-  library_fetch: handleFetchLibrary,
-  library_update: handleUpdateLibrary,
-  library_fix: handleFixLibrary,
-  library_get_3d_model: handleGet3DModel,
-  // EasyEDA community library
-  easyeda_search: handleEasyedaSearch,
-  easyeda_get_3d_model: handleEasyedaGet3DModel,
+  [componentSearchTool.name]: handleComponentSearch,
+  [libraryInstallTool.name]: handleLibraryInstall,
+  [libraryBatchInstallTool.name]: handleLibraryBatchInstall,
+  [libraryGetComponentTool.name]: handleLibraryGetComponent,
+  [updateLibraryTool.name]: handleUpdateLibrary,
+  [fixLibraryTool.name]: handleFixLibrary,
 };
 
-// Re-export individual tools
-export { searchComponentsTool, handleSearchComponents } from './search.js';
-export { getComponentTool, handleGetComponent } from './details.js';
+// Re-export for direct imports
+export { componentSearchTool, handleComponentSearch } from './search.js';
 export {
-  getSymbolKicadTool,
-  getFootprintKicadTool,
-  fetchLibraryTool,
-  get3DModelTool,
-  handleGetSymbolKicad,
-  handleGetFootprintKicad,
-  handleFetchLibrary,
-  handleGet3DModel,
+  libraryInstallTool,
+  libraryGetComponentTool,
+  handleLibraryInstall,
+  handleLibraryGetComponent,
 } from './library.js';
+export {
+  libraryBatchInstallTool,
+  handleLibraryBatchInstall,
+} from './batch.js';
 export {
   updateLibraryTool,
   handleUpdateLibrary,
@@ -90,9 +69,3 @@ export {
   fixLibraryTool,
   handleFixLibrary,
 } from './library-fix.js';
-export {
-  easyedaSearchTool,
-  easyedaGet3DModelTool,
-  handleEasyedaSearch,
-  handleEasyedaGet3DModel,
-} from './easyeda.js';

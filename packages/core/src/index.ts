@@ -26,3 +26,6 @@ export * from './parsers/index.js';
 
 // HTTP Server
 export * from './http/index.js';
+
+// Testing utilities (for validation)
+export * from './testing/index.js';

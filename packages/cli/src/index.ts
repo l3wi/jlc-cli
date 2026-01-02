@@ -11,6 +11,7 @@ import { infoCommand } from './commands/info.js';
 import { installCommand } from './commands/install.js';
 import { libraryCommand } from './commands/library.js';
 import { easyedaSearchCommand, easyedaInstallCommand } from './commands/easyeda.js';
+import { validateCommand } from './commands/validate.js';
 
 const program = new Command();
 
@@ -64,6 +65,26 @@ program
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     await libraryCommand({
+      json: options.json,
+    });
+  });
+
+program
+  .command('validate [id]')
+  .description('Validate footprint/symbol generation against JLCPCB reference')
+  .option('--footprint-only', 'Only validate footprint')
+  .option('--symbol-only', 'Only validate symbol')
+  .option('-c, --category <name>', 'Validate all components in category')
+  .option('-a, --all', 'Validate all test fixtures')
+  .option('--html <path>', 'Output HTML report to file')
+  .option('--json', 'Output as JSON')
+  .action(async (id, options) => {
+    await validateCommand(id, {
+      footprintOnly: options.footprintOnly,
+      symbolOnly: options.symbolOnly,
+      category: options.category,
+      all: options.all,
+      html: options.html,
       json: options.json,
     });
   });

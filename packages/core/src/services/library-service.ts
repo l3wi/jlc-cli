@@ -10,7 +10,7 @@ import { join, basename } from 'path';
 
 import type { EasyEDAComponentData, EasyEDACommunityComponent } from '../types/index.js';
 import type { LibraryCategory } from '../converter/category-router.js';
-import { ensureDir, writeText, writeBinary } from '../utils/index.js';
+import { ensureDir, writeText, writeBinary, detectKicadVersion } from '../utils/index.js';
 import { easyedaClient } from '../api/easyeda.js';
 import { easyedaCommunityClient } from '../api/easyeda-community.js';
 import { jlcClient } from '../api/jlc.js';
@@ -34,9 +34,6 @@ import {
 const FOOTPRINT_LIBRARY_NAME = getFootprintDirName();
 const MODELS_3D_NAME = get3DModelsDirName();
 const LIBRARY_NAMESPACE = 'jlc_mcp';
-
-// KiCad versions to check
-const KICAD_VERSIONS = ['9.0', '8.0'];
 
 // EasyEDA community library naming (global)
 const EASYEDA_LIBRARY_NAME = 'EasyEDA';
@@ -160,18 +157,6 @@ interface LibraryPaths {
   models3dDir: string;
   footprintDir: string;
   models3dFullDir: string;
-}
-
-function detectKicadVersion(): string {
-  const home = homedir();
-  const baseDir = join(home, 'Documents', 'KiCad');
-
-  for (const version of KICAD_VERSIONS) {
-    if (existsSync(join(baseDir, version))) {
-      return version;
-    }
-  }
-  return '9.0';
 }
 
 function getGlobalLibraryPaths(): LibraryPaths {

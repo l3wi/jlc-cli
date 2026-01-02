@@ -1,54 +1,18 @@
 /**
- * Library fetching and conversion tools for MCP
- * Uses jlc-core for all business logic
+ * Library management tools for MCP
+ * Streamlined version using LibraryService from core
  */
 
 import { z } from 'zod';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import {
-  createLibraryService,
-  createComponentService,
-  easyedaClient,
-  symbolConverter,
-  footprintConverter,
-} from '@jlcpcb/core';
+import { getLibraryService } from '../services.js';
+import { LcscIdSchema, SafePathSchema, isLcscId } from '../schemas.js';
 
-const libraryService = createLibraryService();
-const componentService = createComponentService();
+// Tool Definitions
 
-export const getSymbolKicadTool: Tool = {
-  name: 'library_get_symbol',
-  description: 'Get a KiCad-compatible symbol definition by LCSC part number. Returns the symbol in .kicad_sym format. LCSC is JLC PCB\'s preferred supplier for assembly.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      lcsc_id: {
-        type: 'string',
-        description: 'LCSC part number (e.g., C2040)',
-      },
-    },
-    required: ['lcsc_id'],
-  },
-};
-
-export const getFootprintKicadTool: Tool = {
-  name: 'library_get_footprint',
-  description: 'Get a KiCad-compatible footprint definition by LCSC part number. Returns the footprint in .kicad_mod format. LCSC is JLC PCB\'s preferred supplier for assembly.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      lcsc_id: {
-        type: 'string',
-        description: 'LCSC part number (e.g., C2040)',
-      },
-    },
-    required: ['lcsc_id'],
-  },
-};
-
-export const fetchLibraryTool: Tool = {
-  name: 'library_fetch',
-  description: `Fetch a component and add it to KiCad libraries.
+export const libraryInstallTool: Tool = {
+  name: 'library_install',
+  description: `Install a component to KiCad libraries.
 
 Accepts:
 - LCSC part numbers (e.g., C2040) → global JLC-MCP libraries
@@ -58,11 +22,7 @@ LCSC components are routed to category-based global libraries:
 - JLC-MCP-Resistors.kicad_sym, JLC-MCP-Capacitors.kicad_sym, JLC-MCP-ICs.kicad_sym, etc.
 - Stored at ~/Documents/KiCad/{version}/3rdparty/jlc_mcp/
 
-EasyEDA community components are stored project-locally:
-- <project>/libraries/symbols/EasyEDA.kicad_sym
-- <project>/libraries/footprints/EasyEDA.pretty/
-
-Returns symbol_ref and footprint_ref for immediate use with add_schematic_component.`,
+Returns symbol_ref and footprint_ref for use with schematic placement.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -76,105 +36,54 @@ Returns symbol_ref and footprint_ref for immediate use with add_schematic_compon
       },
       include_3d: {
         type: 'boolean',
-        description: 'Include 3D model if available (default: false for LCSC, true for EasyEDA)',
+        description: 'Include 3D model if available (default: false)',
+      },
+      force: {
+        type: 'boolean',
+        description: 'Reinstall even if already exists (default: false)',
       },
     },
     required: ['id'],
   },
 };
 
-export const get3DModelTool: Tool = {
-  name: 'library_get_3d_model',
-  description: 'Download a 3D model for a component. Requires the model UUID from component_get. Returns the model as base64-encoded STEP data.',
+export const libraryGetComponentTool: Tool = {
+  name: 'library_get_component',
+  description: `Get metadata for an installed component's symbol and footprint.
+
+Returns symbol reference, footprint reference, file paths, and pin/pad counts.
+Does NOT return full file contents to minimize token usage.
+
+Use this to verify installation or get references for schematic placement.`,
   inputSchema: {
     type: 'object',
     properties: {
-      uuid: {
+      id: {
         type: 'string',
-        description: '3D model UUID from component_get result',
-      },
-      format: {
-        type: 'string',
-        enum: ['step', 'obj'],
-        description: 'Model format: "step" or "obj" (default: step)',
+        description: 'LCSC part number (e.g., C2040)',
       },
     },
-    required: ['uuid'],
+    required: ['id'],
   },
 };
 
-export const LibraryParamsSchema = z.object({
-  lcsc_id: z.string().regex(/^C\d+$/, 'Invalid LCSC part number'),
-});
+// Zod Schemas
 
-export const FetchLibraryParamsSchema = z.object({
+export const LibraryInstallParamsSchema = z.object({
   id: z.string().min(1),
-  project_path: z.string().min(1).optional(),
+  project_path: SafePathSchema.optional(),
   include_3d: z.boolean().optional(),
+  force: z.boolean().optional(),
 });
 
-export const Model3DParamsSchema = z.object({
-  uuid: z.string().min(1),
-  format: z.enum(['step', 'obj']).default('step'),
+export const LibraryGetComponentParamsSchema = z.object({
+  id: LcscIdSchema,
 });
 
-export async function handleGetSymbolKicad(args: unknown) {
-  const params = LibraryParamsSchema.parse(args);
+// Handlers
 
-  const component = await easyedaClient.getComponentData(params.lcsc_id);
-
-  if (!component) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Component ${params.lcsc_id} not found`,
-      }],
-      isError: true,
-    };
-  }
-
-  const symbol = symbolConverter.convert(component);
-  return {
-    content: [{
-      type: 'text' as const,
-      text: symbol,
-    }],
-  };
-}
-
-export async function handleGetFootprintKicad(args: unknown) {
-  const params = LibraryParamsSchema.parse(args);
-
-  const component = await easyedaClient.getComponentData(params.lcsc_id);
-
-  if (!component) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Component ${params.lcsc_id} not found`,
-      }],
-      isError: true,
-    };
-  }
-
-  const footprint = footprintConverter.convert(component);
-  return {
-    content: [{
-      type: 'text' as const,
-      text: footprint,
-    }],
-  };
-}
-
-/**
- * Check if ID is an LCSC part number (C followed by digits)
- */
-function isLcscId(id: string): boolean {
-  return /^C\d+$/.test(id);
-}
-
-export async function handleFetchLibrary(args: unknown) {
-  const params = FetchLibraryParamsSchema.parse(args);
+export async function handleLibraryInstall(args: unknown) {
+  const params = LibraryInstallParamsSchema.parse(args);
   const isCommunityComponent = !isLcscId(params.id);
 
   // Community components require project_path
@@ -194,33 +103,36 @@ export async function handleFetchLibrary(args: unknown) {
   }
 
   try {
-    const result = await libraryService.install(params.id, {
+    const result = await getLibraryService().install(params.id, {
       projectPath: params.project_path,
       include3d: params.include_3d,
+      force: params.force,
     });
 
+    // Compact response - essential data only
     return {
       content: [{
         type: 'text' as const,
         text: JSON.stringify({
           success: true,
           id: params.id,
-          source: result.source,
-          storage_mode: result.storageMode,
-          category: result.category,
-          symbol_name: result.symbolName,
+          installed: true,
           symbol_ref: result.symbolRef,
           footprint_ref: result.footprintRef,
-          footprint_type: result.footprintType,
-          datasheet: result.datasheet,
+          category: result.category,
           files: {
             symbol_library: result.files.symbolLibrary,
             footprint: result.files.footprint,
             model_3d: result.files.model3d,
           },
-          symbol_action: result.symbolAction,
-          validation_data: result.validationData,
-        }, null, 2),
+          validation: result.validationData ? {
+            pin_pad_match: result.validationData.pinCount === result.validationData.padCount,
+            pin_count: result.validationData.pinCount,
+            pad_count: result.validationData.padCount,
+            has_power_pins: result.validationData.hasPowerPins,
+            has_ground_pins: result.validationData.hasGroundPins,
+          } : undefined,
+        }),
       }],
     };
   } catch (error) {
@@ -231,7 +143,6 @@ export async function handleFetchLibrary(args: unknown) {
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error',
           id: params.id,
-          source: isCommunityComponent ? 'easyeda_community' : 'lcsc',
         }),
       }],
       isError: true,
@@ -239,25 +150,73 @@ export async function handleFetchLibrary(args: unknown) {
   }
 }
 
-export async function handleGet3DModel(args: unknown) {
-  const params = Model3DParamsSchema.parse(args);
+export async function handleLibraryGetComponent(args: unknown) {
+  const params = LibraryGetComponentParamsSchema.parse(args);
 
-  const model = await easyedaClient.get3DModel(params.uuid, params.format);
+  try {
+    // Check if component is installed
+    const status = await getLibraryService().getStatus();
+    if (!status.installed) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            success: false,
+            error: 'JLC-MCP libraries not installed. Run library_install first.',
+            id: params.id,
+          }),
+        }],
+        isError: true,
+      };
+    }
 
-  if (!model) {
+    // Get list of installed components
+    const installed = await getLibraryService().listInstalled();
+    const component = installed.find(c => c.lcscId === params.id);
+
+    if (!component) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            success: false,
+            error: `Component ${params.id} is not installed`,
+            id: params.id,
+            hint: 'Use library_install to add this component first',
+          }),
+        }],
+        isError: true,
+      };
+    }
+
+    // Return metadata only (no file contents)
     return {
       content: [{
         type: 'text' as const,
-        text: `3D model ${params.uuid} not found`,
+        text: JSON.stringify({
+          success: true,
+          id: params.id,
+          installed: true,
+          symbol_ref: component.symbolRef,
+          footprint_ref: component.footprintRef,
+          category: component.category,
+          symbol_library: component.symbolLibrary,
+          name: component.name,
+          description: component.description,
+        }),
+      }],
+    };
+  } catch (error) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          id: params.id,
+        }),
       }],
       isError: true,
     };
   }
-
-  return {
-    content: [{
-      type: 'text' as const,
-      text: `3D model downloaded (${model.length} bytes, ${params.format.toUpperCase()} format)\n\nBase64 data:\n${model.toString('base64').slice(0, 500)}...`,
-    }],
-  };
 }

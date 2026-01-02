@@ -103,6 +103,7 @@ export const KICAD_LIBRARY_DESCRIPTION = 'AI-EDA Component Library (JLC/EasyEDA)
 
 // Supported KiCad versions (newest first)
 export const KICAD_VERSIONS = ['9.0', '8.0'] as const;
+export type KiCadVersion = (typeof KICAD_VERSIONS)[number];
 
 /**
  * Get global KiCad library paths for a specific platform

@@ -21,29 +21,12 @@ import {
   type LibraryCategory,
   ensureDir,
   writeText,
+  detectKicadVersion,
 } from '@jlcpcb/core';
 import { join } from 'path';
 
-// KiCad versions to check (newest first)
-const KICAD_VERSIONS = ['9.0', '8.0'];
-
 // 3rd party library namespace
 const LIBRARY_NAMESPACE = 'jlc_mcp';
-
-/**
- * Detect KiCad major version from existing user directories
- */
-function detectKicadVersion(): string {
-  const home = homedir();
-  const baseDir = join(home, 'Documents', 'KiCad');
-
-  for (const version of KICAD_VERSIONS) {
-    if (existsSync(join(baseDir, version))) {
-      return version;
-    }
-  }
-  return '9.0'; // Default
-}
 
 /**
  * Get library paths for update operation
@@ -383,6 +366,8 @@ export async function handleUpdateLibrary(args: unknown) {
     custom_generated: successful.filter((r) => r.footprintType === 'generated').length,
   };
 
+  // Compact response - summary only, no detailed failures
+  // (failures can be retrieved separately if needed)
   return {
     content: [{
       type: 'text' as const,
@@ -390,23 +375,19 @@ export async function handleUpdateLibrary(args: unknown) {
         success: true,
         dry_run: params.dry_run,
         summary: {
-          total_components: allLcscIds.size,
+          total: allLcscIds.size,
           updated: successful.length,
           failed: failed.length,
-          libraries_generated: categorySymbols.size,
         },
         by_category: Object.fromEntries(byCategory),
         footprint_stats: footprintStats,
-        libraries_written: params.dry_run
-          ? []
-          : Array.from(categorySymbols.keys()).map((cat) =>
-            join(paths.symbolsDir, getLibraryFilename(cat))
-          ),
-        failed_components: failed.map((f) => ({
+        // Only include first 5 failures to avoid massive responses
+        failed_sample: failed.slice(0, 5).map((f) => ({
           lcsc_id: f.lcscId,
           error: f.error,
         })),
-      }, null, 2),
+        has_more_failures: failed.length > 5,
+      }),
     }],
   };
 }
