@@ -141,10 +141,24 @@ export interface UpdateResult {
   components: Array<{ id: string; status: 'updated' | 'failed' | 'skipped'; error?: string }>;
 }
 
+export interface RegenerateOptions {
+  projectPath?: string;
+  include3d?: boolean;
+  onProgress?: (current: number, total: number, component: InstalledComponent, status: 'start' | 'success' | 'error', error?: string) => void;
+}
+
+export interface RegenerateResult {
+  total: number;
+  success: number;
+  failed: number;
+  components: Array<{ id: string; name: string; status: 'success' | 'failed'; error?: string }>;
+}
+
 export interface LibraryService {
   install(id: string, options?: InstallOptions): Promise<InstallResult>;
   listInstalled(options?: ListOptions): Promise<InstalledComponent[]>;
   update(options?: UpdateOptions): Promise<UpdateResult>;
+  regenerate(options?: RegenerateOptions): Promise<RegenerateResult>;
   ensureGlobalTables(): Promise<void>;
   getStatus(): Promise<LibraryStatus>;
   isEasyEDAInstalled(componentName: string): Promise<boolean>;
@@ -478,8 +492,8 @@ export function createLibraryService(): LibraryService {
         // Pre-compute symbol name for 3D model path
         symbolName = symbolConverter.getSymbolName(component);
 
-        // Download 3D model first if requested (needed for footprint generation)
-        const include3d = options.include3d ?? false;
+        // Download 3D model first if available (needed for footprint generation)
+        const include3d = options.include3d ?? true;
         let modelRelativePath: string | undefined;
 
         if (include3d && component.model3d) {
@@ -727,6 +741,60 @@ export function createLibraryService(): LibraryService {
       } catch {
         return false;
       }
+    },
+
+    async regenerate(options: RegenerateOptions = {}): Promise<RegenerateResult> {
+      const include3d = options.include3d ?? true;
+
+      // Get all installed JLCPCB components (not EasyEDA community)
+      const installed = await this.listInstalled({ projectPath: options.projectPath });
+
+      const results: RegenerateResult = {
+        total: installed.length,
+        success: 0,
+        failed: 0,
+        components: [],
+      };
+
+      for (let i = 0; i < installed.length; i++) {
+        const component = installed[i];
+
+        // Notify progress - starting
+        options.onProgress?.(i + 1, installed.length, component, 'start');
+
+        try {
+          // Re-install the component with force to regenerate everything
+          await this.install(component.lcscId, {
+            projectPath: options.projectPath,
+            include3d,
+            force: true,
+          });
+
+          results.success++;
+          results.components.push({
+            id: component.lcscId,
+            name: component.name,
+            status: 'success',
+          });
+
+          // Notify progress - success
+          options.onProgress?.(i + 1, installed.length, component, 'success');
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          results.failed++;
+          results.components.push({
+            id: component.lcscId,
+            name: component.name,
+            status: 'failed',
+            error: errorMessage,
+          });
+
+          // Notify progress - error
+          options.onProgress?.(i + 1, installed.length, component, 'error', errorMessage);
+        }
+      }
+
+      return results;
     },
   };
 }

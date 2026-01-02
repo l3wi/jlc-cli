@@ -9,7 +9,7 @@ import { Command } from 'commander';
 import { searchCommand } from './commands/search.js';
 import { infoCommand } from './commands/info.js';
 import { installCommand } from './commands/install.js';
-import { libraryCommand } from './commands/library.js';
+import { libraryCommand, regenerateCommand } from './commands/library.js';
 import { easyedaSearchCommand, easyedaInstallCommand } from './commands/easyeda.js';
 import { validateCommand } from './commands/validate.js';
 
@@ -59,13 +59,30 @@ program
     });
   });
 
-program
+// Library subcommand group
+const library = program
   .command('library')
-  .description('View JLC-MCP library status and installed components')
+  .description('JLC-MCP library management');
+
+library
+  .command('status', { isDefault: true })
+  .description('View library status and installed components')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     await libraryCommand({
       json: options.json,
+    });
+  });
+
+library
+  .command('regenerate')
+  .description('Regenerate all installed components (refetch and reconvert symbols, footprints, 3D models)')
+  .option('-p, --project <path>', 'Regenerate project-local library')
+  .option('--no-3d', 'Skip 3D model download')
+  .action(async (options) => {
+    await regenerateCommand({
+      projectPath: options.project,
+      include3d: options['3d'],
     });
   });
 
