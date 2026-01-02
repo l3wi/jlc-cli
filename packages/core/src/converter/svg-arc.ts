@@ -177,3 +177,56 @@ export function normalizeAngle(degrees: number): number {
   while (degrees >= 360) degrees -= 360;
   return degrees;
 }
+
+/**
+ * Point type for arc interpolation
+ */
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/**
+ * Interpolate points along an SVG arc
+ * Used for converting arc curves to polygon vertices in SOLIDREGION paths
+ *
+ * @param params Arc endpoint parameters from SVG path
+ * @param segmentsPerQuarter Number of points per 90 degrees of arc (default: 4)
+ * @returns Array of points along the arc (excluding start point, including end point)
+ */
+export function interpolateArc(params: ArcEndpointParams, segmentsPerQuarter = 4): Point[] {
+  const center = svgArcToCenter(params);
+  if (!center) {
+    // Degenerate arc (zero radius) - return just the endpoint
+    return [{ x: params.x2, y: params.y2 }];
+  }
+
+  const { cx, cy, rx, ry, startAngle, deltaAngle } = center;
+  const phiRad = (params.phi * Math.PI) / 180;
+  const cosPhi = Math.cos(phiRad);
+  const sinPhi = Math.sin(phiRad);
+
+  // Calculate number of segments based on arc sweep
+  const arcDegrees = Math.abs(deltaAngle) * (180 / Math.PI);
+  const numSegments = Math.max(2, Math.ceil((arcDegrees / 90) * segmentsPerQuarter));
+
+  const points: Point[] = [];
+
+  // Sample points along the arc (start at i=1 to skip start point, which caller already has)
+  for (let i = 1; i <= numSegments; i++) {
+    const t = i / numSegments;
+    const angle = startAngle + deltaAngle * t;
+
+    // Point on ellipse (before rotation)
+    const px = rx * Math.cos(angle);
+    const py = ry * Math.sin(angle);
+
+    // Apply rotation and translate to center
+    const x = cosPhi * px - sinPhi * py + cx;
+    const y = sinPhi * px + cosPhi * py + cy;
+
+    points.push({ x, y });
+  }
+
+  return points;
+}

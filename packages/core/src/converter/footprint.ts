@@ -20,6 +20,7 @@ import type {
 import { KICAD_FOOTPRINT_VERSION, KICAD_LAYERS } from '../constants/index.js';
 import { roundTo } from '../utils/index.js';
 import { mapToKicadFootprint, getKicadFootprintRef, getExpectedPadCount } from './footprint-mapper.js';
+import { interpolateArc, type ArcEndpointParams } from './svg-arc.js';
 
 // =============================================================================
 // Constants - EasyEDA to KiCad mappings from easyeda2kicad.py
@@ -884,14 +885,33 @@ ${justify ? `\t\t\t(justify ${justify})\n` : ''}\t\t)
             });
           }
           break;
-        case 'A': // arc - use endpoint (last 2 args)
+        case 'A': // arc - interpolate points along curve for accurate polygon
           if (args.length >= 7) {
+            // Build arc parameters from SVG path args
+            const arcParams: ArcEndpointParams = {
+              x1: currentX,
+              y1: currentY,
+              rx: args[0],
+              ry: args[1],
+              phi: args[2],
+              largeArc: args[3] === 1,
+              sweep: args[4] === 1,
+              x2: args[5],
+              y2: args[6],
+            };
+
+            // Interpolate points along the arc (4 points per 90°)
+            const arcPoints = interpolateArc(arcParams, 4);
+            for (const pt of arcPoints) {
+              points.push({
+                x: convertX(pt.x, origin.x),
+                y: convertY(pt.y, origin.y),
+              });
+            }
+
+            // Update current position to arc endpoint
             currentX = args[5];
             currentY = args[6];
-            points.push({
-              x: convertX(currentX, origin.x),
-              y: convertY(currentY, origin.y),
-            });
           }
           break;
         case 'Z': // closepath - no need to add point, polygon closes automatically
