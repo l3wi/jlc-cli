@@ -1,5 +1,15 @@
 # @jlcpcb/core
 
+## 0.3.1
+
+### Patch Changes
+
+- d5a74c2: Fix EasyEDA 3D model transform import so KiCad footprints preserve model offsets and rotations.
+
+  Improve CLI table formatting so search and library rows keep aligned columns, including with wide characters.
+
+  Add workspace lint scripts and ESLint configuration so `bun run lint` works across packages.
+
 ## 0.3.0
 
 ### Minor Changes

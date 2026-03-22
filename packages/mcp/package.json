@@ -1,6 +1,6 @@
 {
   "name": "@jlcpcb/mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "type": "module",
   "description": "MCP server for JLC/EasyEDA component sourcing, library fetching, and conversion to KiCad format",
