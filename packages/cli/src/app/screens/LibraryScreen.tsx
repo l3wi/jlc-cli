@@ -6,14 +6,14 @@ import type { LibraryParams } from '../navigation/types.js';
 import { useAppState } from '../state/AppStateContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { Divider } from '../components/Divider.js';
+import {
+  formatLibraryHeader,
+  formatLibraryRow,
+  getLibraryTableWidths,
+} from '../components/library-table-format.js';
 
 const libraryService = createLibraryService();
 const componentService = createComponentService();
-
-function truncate(str: string, len: number): string {
-  if (!str) return '';
-  return str.length > len ? str.slice(0, len - 1) + '…' : str;
-}
 
 function StatusBadge({ installed, linked }: { installed: boolean; linked: boolean }) {
   if (installed && linked) {
@@ -193,10 +193,7 @@ export function LibraryScreen() {
   // Components table - full width responsive layout
   // Fixed columns: selector(2) + name + category + status columns(15)
   // Description takes remaining space
-  const nameWidth = 20;
-  const categoryWidth = 12;
-  const statusWidth = 15; // Sym(5) + FP(5) + 3D(5)
-  const descWidth = Math.max(terminalWidth - 2 - nameWidth - categoryWidth - statusWidth, 15);
+  const widths = getLibraryTableWidths(terminalWidth);
 
   return (
     <Box flexDirection="column" width="100%">
@@ -216,36 +213,36 @@ export function LibraryScreen() {
       </Box>
       <Divider width={terminalWidth} />
       <Box marginBottom={1} marginTop={1}>
-        <Text bold dimColor>
-          {'  '}
-          {'Name'.padEnd(nameWidth)}
-          {'Category'.padEnd(categoryWidth)}
-          {'Description'.padEnd(descWidth)}
-          {'Sym'.padEnd(5)}
-          {'FP'.padEnd(5)}
-          {'3D'}
-        </Text>
+        <Text bold dimColor>{formatLibraryHeader(widths)}</Text>
       </Box>
       {installed.map((item, i) => {
         const isSelected = i === selectedIndex;
         const desc = descriptions[item.lcscId] || '';
-        // Check if footprint is standard KiCad (not JLC-MCP custom)
-        const isStandardFp = item.footprintRef && !item.footprintRef.startsWith('JLC-MCP:');
-        const fpLabel = !item.footprintRef ? 'N' : isStandardFp ? 'S' : 'Y';
-        const fpColor = !item.footprintRef ? 'red' : isStandardFp ? 'cyan' : 'green';
+        const row = formatLibraryRow(item, desc, widths);
         return (
           <Box key={`${item.lcscId}-${i}`}>
             <Text color={isSelected ? 'cyan' : undefined}>
               {isSelected ? '> ' : '  '}
             </Text>
-            <Text inverse={isSelected}>
-              <Text color="cyan">{truncate(item.name, nameWidth - 1).padEnd(nameWidth)}</Text>
-              {truncate(item.category, categoryWidth - 1).padEnd(categoryWidth)}
-              <Text dimColor>{truncate(desc, descWidth - 1).padEnd(descWidth)}</Text>
-              <Text color="green">{'Y'.padEnd(5)}</Text>
-              <Text color={fpColor}>{fpLabel.padEnd(5)}</Text>
-              <Text color={item.has3dModel ? 'green' : 'red'}>{item.has3dModel ? 'Y' : 'N'}</Text>
-            </Text>
+            {isSelected ? (
+              <Text inverse>
+                {row.name}
+                {row.category}
+                {row.description}
+                {row.sym}
+                {row.fp}
+                {row.model}
+              </Text>
+            ) : (
+              <Text>
+                <Text color="cyan">{row.name}</Text>
+                {row.category}
+                <Text dimColor>{row.description}</Text>
+                <Text color="green">{row.sym}</Text>
+                <Text color={row.fpColor}>{row.fp}</Text>
+                <Text color={row.modelColor}>{row.model}</Text>
+              </Text>
+            )}
           </Box>
         );
       })}
