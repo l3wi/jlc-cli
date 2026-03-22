@@ -28,6 +28,19 @@ export interface EasyEDAFootprint {
   shape: string[];
 }
 
+export interface EasyEDA3DVector {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface EasyEDA3DModel {
+  name: string;
+  uuid: string;
+  translation: EasyEDA3DVector;
+  rotation: EasyEDA3DVector;
+}
+
 export interface EasyEDAHead {
   x: string;
   y: string;
@@ -337,7 +350,7 @@ export interface EasyEDAFootprintData {
   vias: EasyEDAVia[];
   solidRegions: EasyEDASolidRegion[];
   origin: { x: number; y: number };
-  model3d?: { name: string; uuid: string }; // Extracted from SVGNODE
+  model3d?: EasyEDA3DModel; // Extracted from SVGNODE
 }
 
 /** Parsed footprint data before origin is added */
@@ -366,9 +379,6 @@ export interface EasyEDAComponentData {
   };
   symbol: EasyEDASymbolData;
   footprint: EasyEDAFootprintData;
-  model3d?: {
-    name: string;
-    uuid: string;
-  };
+  model3d?: EasyEDA3DModel;
   rawData: object;
 }

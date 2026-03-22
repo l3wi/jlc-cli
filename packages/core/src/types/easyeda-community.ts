@@ -6,7 +6,11 @@
  * The only differences are community-specific metadata (owner, creator, etc.)
  */
 
-import type { EasyEDASymbolData, EasyEDAFootprintData } from './easyeda.js';
+import type {
+  EasyEDA3DModel,
+  EasyEDASymbolData,
+  EasyEDAFootprintData,
+} from './easyeda.js';
 
 /**
  * Owner information for a community component
@@ -70,9 +74,6 @@ export interface EasyEDACommunityComponent {
     uuid: string;
     head: Record<string, unknown>;
   };
-  model3d?: {
-    name: string;
-    uuid: string;
-  };
+  model3d?: EasyEDA3DModel;
   rawData: object;
 }

@@ -30,10 +30,46 @@ import type {
   EasyEDAVia,
   EasyEDAText,
   EasyEDASolidRegion,
+  EasyEDA3DModel,
   ParsedFootprintData,
 } from '../types/easyeda.js';
 
 import { parseBool, safeParseFloat, safeParseInt } from './utils.js';
+
+function parse3DModelNode(data: string): EasyEDA3DModel | undefined {
+  try {
+    const jsonStr = data.slice('SVGNODE~'.length);
+    const svgData = JSON.parse(jsonStr);
+    const attrs = svgData?.attrs;
+    if (!attrs?.uuid) {
+      return undefined;
+    }
+
+    const [translationX, translationY] = String(attrs.c_origin ?? '0,0')
+      .split(',')
+      .map((value: string) => safeParseFloat(value));
+    const [rotationX, rotationY, rotationZ] = String(attrs.c_rotation ?? '0,0,0')
+      .split(',')
+      .map((value: string) => safeParseFloat(value));
+
+    return {
+      name: attrs.title || '3D Model',
+      uuid: attrs.uuid,
+      translation: {
+        x: translationX,
+        y: translationY,
+        z: safeParseFloat(String(attrs.z ?? '0')),
+      },
+      rotation: {
+        x: rotationX,
+        y: rotationY,
+        z: rotationZ,
+      },
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 // =============================================================================
 // Symbol Shape Parsers
@@ -628,7 +664,7 @@ export function parseFootprintShapes(shapes: string[]): ParsedFootprintData {
   const texts: EasyEDAText[] = [];
   const vias: EasyEDAVia[] = [];
   const solidRegions: EasyEDASolidRegion[] = [];
-  let model3d: { name: string; uuid: string } | undefined;
+  let model3d: EasyEDA3DModel | undefined;
 
   for (const line of shapes) {
     if (typeof line !== 'string') continue;
@@ -677,18 +713,9 @@ export function parseFootprintShapes(shapes: string[]): ParsedFootprintData {
         break;
       }
       case 'SVGNODE': {
-        // Extract 3D model info
-        try {
-          const jsonStr = line.split('~')[1];
-          const svgData = JSON.parse(jsonStr);
-          if (svgData?.attrs?.uuid) {
-            model3d = {
-              name: svgData.attrs.title || '3D Model',
-              uuid: svgData.attrs.uuid,
-            };
-          }
-        } catch {
-          // Ignore parse errors
+        const parsedModel3d = parse3DModelNode(line);
+        if (parsedModel3d) {
+          model3d = parsedModel3d;
         }
         break;
       }

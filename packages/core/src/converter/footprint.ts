@@ -16,6 +16,7 @@ import type {
   EasyEDAVia,
   EasyEDAText,
   EasyEDASolidRegion,
+  EasyEDA3DModel,
 } from '../types/index.js';
 import { KICAD_FOOTPRINT_VERSION, KICAD_LAYERS } from '../constants/index.js';
 import { roundTo } from '../utils/index.js';
@@ -98,6 +99,10 @@ interface BoundingBox {
   maxX: number;
   minY: number;
   maxY: number;
+}
+
+function normalize3DModelRotation(rotation: number): number {
+  return ((360 - rotation) % 360 + 360) % 360;
 }
 
 /**
@@ -334,7 +339,7 @@ export class FootprintConverter {
 
     // Add 3D model reference if available
     if (include3DModel && model3d && options.modelPath) {
-      output += this.generate3DModel(options.modelPath);
+      output += this.generate3DModel(options.modelPath, model3d, origin);
     }
 
     output += `)`;
@@ -1112,16 +1117,27 @@ ${justify ? `\t\t\t(justify ${justify})\n` : ''}\t\t)
   /**
    * Generate 3D model reference
    */
-  private generate3DModel(modelPath: string): string {
+  private generate3DModel(
+    modelPath: string,
+    model3d: EasyEDA3DModel,
+    origin: Point
+  ): string {
+    const offsetX = roundTo(toMM(model3d.translation.x - origin.x), 3);
+    const offsetY = roundTo(-toMM(model3d.translation.y - origin.y), 3);
+    const offsetZ = roundTo(-toMM(model3d.translation.z), 3);
+    const rotateX = normalize3DModelRotation(model3d.rotation.x);
+    const rotateY = normalize3DModelRotation(model3d.rotation.y);
+    const rotateZ = normalize3DModelRotation(model3d.rotation.z);
+
     return `\t(model "${modelPath}"
 \t\t(offset
-\t\t\t(xyz 0 0 0)
+\t\t\t(xyz ${offsetX} ${offsetY} ${offsetZ})
 \t\t)
 \t\t(scale
 \t\t\t(xyz 1 1 1)
 \t\t)
 \t\t(rotate
-\t\t\t(xyz 0 0 0)
+\t\t\t(xyz ${rotateX} ${rotateY} ${rotateZ})
 \t\t)
 \t)\n`;
   }
