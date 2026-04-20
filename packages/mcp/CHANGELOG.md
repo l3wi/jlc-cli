@@ -1,5 +1,11 @@
 # @jlcpcb/mcp
 
+## 0.3.2
+
+### Patch Changes
+
+- Move bundled `@jlcpcb/core` workspace links out of runtime dependencies so npm can install published CLI and MCP packages.
+
 ## 0.3.1
 
 ### Patch Changes
