@@ -23,6 +23,7 @@ import {
   type EasyEDAPin,
 } from '@jlcpcb/core';
 import { join } from 'path';
+import { toolError } from '../tool-response.js';
 
 /**
  * Get library paths for fix operation
@@ -107,7 +108,7 @@ export const fixLibraryTool: Tool = {
 Corrections are applied to fresh data fetched from EasyEDA, then the symbol is regenerated.
 Use this tool when Claude detects issues with a symbol (pin names, types, missing pins, etc.).
 
-IMPORTANT: The symbol must already exist in the library. Use library_fetch first to add new components.
+IMPORTANT: The symbol must already exist in the library. Use library_install first to add new components.
 
 Correction types:
 - modify: Rename pin or change electrical type
@@ -213,17 +214,9 @@ export async function handleFixLibrary(args: unknown) {
   const component = await easyedaClient.getComponentData(params.lcsc_id);
 
   if (!component) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
-          success: false,
-          error: `Component ${params.lcsc_id} not found`,
-          lcsc_id: params.lcsc_id,
-        }),
-      }],
-      isError: true,
-    };
+    return toolError('component_not_found', `Component ${params.lcsc_id} not found`, {
+      details: { lcsc_id: params.lcsc_id },
+    });
   }
 
   // Determine category and symbol file path
@@ -237,36 +230,18 @@ export async function handleFixLibrary(args: unknown) {
 
   // Check if symbol library exists
   if (!existsSync(symbolFile) && !params.force) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
-          success: false,
-          error: `Symbol library ${symbolLibraryFilename} does not exist. Use library_fetch first, or set force=true.`,
-          lcsc_id: params.lcsc_id,
-          expected_library: symbolFile,
-        }),
-      }],
-      isError: true,
-    };
+    return toolError('symbol_library_missing', `Symbol library ${symbolLibraryFilename} does not exist. Use library_install first, or set force=true.`, {
+      details: { lcsc_id: params.lcsc_id, expected_library: symbolFile },
+    });
   }
 
   // Check if symbol exists in library (unless force)
   if (existsSync(symbolFile) && !params.force) {
     const existingContent = await readFile(symbolFile, 'utf-8');
     if (!symbolConverter.symbolExistsInLibrary(existingContent, component.info.name)) {
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            success: false,
-            error: `Symbol "${component.info.name}" not found in ${symbolLibraryFilename}. Use library_fetch first, or set force=true.`,
-            lcsc_id: params.lcsc_id,
-            symbol_name: component.info.name,
-          }),
-        }],
-        isError: true,
-      };
+      return toolError('symbol_missing', `Symbol "${component.info.name}" not found in ${symbolLibraryFilename}. Use library_install first, or set force=true.`, {
+        details: { lcsc_id: params.lcsc_id, symbol_name: component.info.name },
+      });
     }
   }
 

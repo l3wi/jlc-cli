@@ -397,6 +397,52 @@ function adaptCommunityComponent(component: EasyEDACommunityComponent): EasyEDAC
   };
 }
 
+function buildValidationData(
+  component: EasyEDAComponentData,
+  footprintRef: string,
+  footprintType: 'reference' | 'generated',
+  isKicadStandardFootprint: boolean
+): ValidationData {
+  return {
+    component: {
+      name: component.info.name,
+      description: component.info.description,
+      package: component.info.package,
+      manufacturer: component.info.manufacturer,
+      datasheet_url: component.info.datasheetPdf || component.info.datasheet,
+    },
+    symbol: {
+      pin_count: component.symbol.pins.length,
+      pins: component.symbol.pins.map(p => ({
+        number: p.number,
+        name: p.name,
+        electrical_type: p.electricalType,
+      })),
+    },
+    footprint: {
+      type: component.footprint.type,
+      pad_count: component.footprint.pads.length,
+      pads: footprintType === 'generated'
+        ? component.footprint.pads.map(p => ({
+            number: p.number,
+            shape: p.shape,
+          }))
+        : null,
+      is_kicad_standard: isKicadStandardFootprint,
+      kicad_ref: footprintRef,
+    },
+    checks: {
+      pin_pad_count_match: component.symbol.pins.length === component.footprint.pads.length,
+      has_power_pins: component.symbol.pins.some(p =>
+        p.electricalType === 'power_in' || p.electricalType === 'power_out'
+      ),
+      has_ground_pins: component.symbol.pins.some(p =>
+        p.name.toLowerCase().includes('gnd') || p.name.toLowerCase().includes('vss')
+      ),
+    },
+  };
+}
+
 export function createLibraryService(): LibraryService {
   return {
     async install(id: string, options: InstallOptions = {}): Promise<InstallResult> {
@@ -489,6 +535,35 @@ export function createLibraryService(): LibraryService {
 
         symbolFile = join(symbolsDir, symLibFile);
         symbolName = component.info.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        footprintPath = join(footprintDir, `${symbolName}.kicad_mod`);
+        footprintRef = `${libName}:${symbolName}`;
+        symbolRef = `${libName}:${symbolName}`;
+        component.info.package = footprintRef;
+
+        if (!options.force && existsSync(symbolFile)) {
+          const existingContent = await readFile(symbolFile, 'utf-8');
+          if (symbolConverter.symbolExistsInLibrary(existingContent, component.info.name)) {
+            return {
+              success: true,
+              id,
+              source: 'easyeda_community',
+              storageMode: isGlobal ? 'global' : 'project-local',
+              category,
+              symbolName,
+              symbolRef,
+              footprintRef,
+              footprintType: 'generated',
+              datasheet: component.info.datasheet,
+              files: {
+                symbolLibrary: symbolFile,
+                footprint: footprintPath,
+                model3d: undefined,
+              },
+              symbolAction: 'exists',
+              validationData: buildValidationData(component, footprintRef, 'generated', false),
+            };
+          }
+        }
 
         // Download 3D model first if available (needed for footprint generation)
         // Community components include 3D by default
@@ -517,11 +592,7 @@ export function createLibraryService(): LibraryService {
           include3DModel: !!modelRelativePath,
           modelPath: modelRelativePath,
         });
-        footprintPath = join(footprintDir, `${symbolName}.kicad_mod`);
-        footprintRef = `${libName}:${symbolName}`;
         await writeText(footprintPath, footprint);
-
-        component.info.package = footprintRef;
 
         // Update lib tables (global or project-local)
         if (isGlobal) {
@@ -532,8 +603,6 @@ export function createLibraryService(): LibraryService {
           await ensureSymLibTable(options.projectPath!, symbolFile, libName, libDesc);
           await ensureFpLibTable(options.projectPath!, footprintDir, libName, libDesc);
         }
-
-        symbolRef = `${libName}:${symbolName}`;
       } else {
         // LCSC component → JLC-MCP category-based library
         category = getLibraryCategory(
@@ -552,6 +621,49 @@ export function createLibraryService(): LibraryService {
 
         // Pre-compute symbol name for 3D model path
         symbolName = symbolConverter.getSymbolName(component);
+        symbolRef = getSymbolReference(category as LibraryCategory, symbolName);
+
+        if (!options.force && existsSync(symbolFile)) {
+          const existingContent = await readFile(symbolFile, 'utf-8');
+          if (symbolConverter.symbolExistsInLibrary(existingContent, component.info.name)) {
+            const existingFootprintResult = footprintConverter.getFootprint(component);
+            if (existingFootprintResult.type === 'reference') {
+              footprintRef = existingFootprintResult.reference!;
+              footprintPath = undefined;
+            } else {
+              footprintPath = join(footprintDir, `${existingFootprintResult.name}.kicad_mod`);
+              footprintRef = getFootprintReference(existingFootprintResult.name);
+            }
+
+            component.info.package = footprintRef;
+            const footprintType = existingFootprintResult.type === 'reference' ? 'reference' : 'generated';
+
+            return {
+              success: true,
+              id,
+              source: 'lcsc',
+              storageMode: isGlobal ? 'global' : 'project-local',
+              category,
+              symbolName,
+              symbolRef,
+              footprintRef,
+              footprintType,
+              datasheet: component.info.datasheet || `https://www.lcsc.com/datasheet/lcsc_datasheet_${id}.pdf`,
+              files: {
+                symbolLibrary: symbolFile,
+                footprint: footprintPath,
+                model3d: undefined,
+              },
+              symbolAction: 'exists',
+              validationData: buildValidationData(
+                component,
+                footprintRef,
+                footprintType,
+                existingFootprintResult.type === 'reference'
+              ),
+            };
+          }
+        }
 
         // Download 3D model first if available (needed for footprint generation)
         const include3d = options.include3d ?? true;
@@ -584,7 +696,6 @@ export function createLibraryService(): LibraryService {
         }
 
         component.info.package = footprintRef;
-        symbolRef = getSymbolReference(category as LibraryCategory, symbolName);
 
         // Update lib tables (project-local only)
         if (!isGlobal && options.projectPath) {
@@ -634,45 +745,12 @@ export function createLibraryService(): LibraryService {
       // Build validation data
       const isKicadStandardFootprint = !isCommunityComponent && !footprintPath;
       const footprintType = isKicadStandardFootprint ? 'reference' : 'generated';
-
-      const validationData: ValidationData = {
-        component: {
-          name: component.info.name,
-          description: component.info.description,
-          package: component.info.package,
-          manufacturer: component.info.manufacturer,
-          datasheet_url: component.info.datasheetPdf || component.info.datasheet,
-        },
-        symbol: {
-          pin_count: component.symbol.pins.length,
-          pins: component.symbol.pins.map(p => ({
-            number: p.number,
-            name: p.name,
-            electrical_type: p.electricalType,
-          })),
-        },
-        footprint: {
-          type: component.footprint.type,
-          pad_count: component.footprint.pads.length,
-          pads: footprintType === 'generated'
-            ? component.footprint.pads.map(p => ({
-                number: p.number,
-                shape: p.shape,
-              }))
-            : null,
-          is_kicad_standard: isKicadStandardFootprint,
-          kicad_ref: footprintRef,
-        },
-        checks: {
-          pin_pad_count_match: component.symbol.pins.length === component.footprint.pads.length,
-          has_power_pins: component.symbol.pins.some(p =>
-            p.electricalType === 'power_in' || p.electricalType === 'power_out'
-          ),
-          has_ground_pins: component.symbol.pins.some(p =>
-            p.name.toLowerCase().includes('gnd') || p.name.toLowerCase().includes('vss')
-          ),
-        },
-      };
+      const validationData = buildValidationData(
+        component,
+        footprintRef,
+        footprintType,
+        isKicadStandardFootprint
+      );
 
       return {
         success: true,

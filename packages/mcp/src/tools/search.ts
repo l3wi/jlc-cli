@@ -15,6 +15,7 @@ export const componentSearchTool: Tool = {
 Sources:
 - "lcsc" (default): Search JLCPCB/LCSC official parts library. Returns components with LCSC IDs available for JLC assembly.
 - "community": Search EasyEDA community library for user-contributed parts (Arduino modules, XIAO, custom breakouts).
+- "all": Search both sources and return discriminated IDs.
 
 Returns full component details for selection including:
 - LCSC ID, manufacturer part number, manufacturer name
@@ -30,8 +31,8 @@ Returns full component details for selection including:
       },
       source: {
         type: 'string',
-        enum: ['lcsc', 'community'],
-        description: 'Search source: "lcsc" for official parts (default), "community" for EasyEDA user-contributed',
+        enum: ['lcsc', 'community', 'all'],
+        description: 'Search source: "lcsc" for official parts (default), "community" for EasyEDA user-contributed, "all" for both',
       },
       limit: {
         type: 'number',
@@ -52,7 +53,7 @@ Returns full component details for selection including:
 
 export const SearchParamsSchema = z.object({
   query: z.string().min(1),
-  source: z.enum(['lcsc', 'community']).default('lcsc'),
+  source: z.enum(['lcsc', 'community', 'all']).default('lcsc'),
   limit: z.number().min(1).max(50).default(10),
   in_stock: z.boolean().optional(),
   basic_only: z.boolean().optional(),
@@ -88,7 +89,10 @@ export async function handleComponentSearch(args: unknown) {
 
   // Return compact results with all selection-relevant fields
   const compactResults = results.map((r: ComponentSearchResult) => ({
-    lcsc_id: r.lcscId,
+    id: r.id,
+    id_type: r.idType,
+    lcsc_id: r.idType === 'lcsc' ? r.lcscId : undefined,
+    easyeda_uuid: r.idType === 'easyeda_uuid' ? r.easyedaUuid ?? r.id : undefined,
     name: r.name,               // Manufacturer part number
     manufacturer: r.manufacturer,
     description: r.description,

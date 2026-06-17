@@ -5,11 +5,19 @@
 
 import { createComponentService, type SearchOptions } from '@jlcpcb/core';
 import { renderApp } from '../app/App.js';
+import { printJson, printJsonError, getErrorMessage } from '../utils/agent-output.js';
+import { formatSearchResultForJson } from '../utils/search-result-output.js';
 
 const componentService = createComponentService();
 
-export async function searchCommand(query: string, options: SearchOptions): Promise<void> {
-  console.log(`Searching for "${query}"...`);
+interface SearchCommandOptions extends SearchOptions {
+  json?: boolean;
+}
+
+export async function searchCommand(query: string, options: SearchCommandOptions): Promise<void> {
+  if (!options.json) {
+    console.log(`Searching for "${query}"...`);
+  }
 
   try {
     let results = await componentService.search(query, options);
@@ -24,7 +32,27 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
     }
 
     if (results.length === 0) {
+      if (options.json) {
+        printJson({
+          success: true,
+          query,
+          count: 0,
+          results: [],
+        });
+        return;
+      }
+
       console.log('No components found. Try a different search term.');
+      return;
+    }
+
+    if (options.json) {
+      printJson({
+        success: true,
+        query,
+        count: results.length,
+        results: results.map(formatSearchResultForJson),
+      });
       return;
     }
 
@@ -32,7 +60,11 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
     process.stdout.write('\x1b[1A\x1b[2K');
     await renderApp('search', { query, results });
   } catch (error) {
-    console.error(`Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (options.json) {
+      printJsonError('search_failed', getErrorMessage(error), { retryable: true });
+    } else {
+      console.error(`Search failed: ${getErrorMessage(error)}`);
+    }
     process.exit(1);
   }
 }

@@ -127,6 +127,8 @@ export class JLCClient {
       logger.debug(`Found ${components.length} components`);
 
       return components.map((c) => ({
+        id: c.componentCode,
+        idType: 'lcsc' as const,
         lcscId: c.componentCode,
         name: c.componentModelEn,
         manufacturer: c.componentBrandEn,

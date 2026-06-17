@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getLibraryService } from '../services.js';
 import { LcscIdSchema } from '../schemas.js';
+import { jsonContent } from '../tool-response.js';
 
 export const libraryBatchInstallTool: Tool = {
   name: 'library_batch_install',
@@ -31,7 +32,7 @@ Use this when you need to install a bill of materials or multiple components at 
       },
       include_3d: {
         type: 'boolean',
-        description: 'Include 3D models if available (default: false)',
+        description: 'Include 3D models if available (default: true)',
       },
     },
     required: ['ids'],
@@ -106,10 +107,10 @@ export async function handleLibraryBatchInstall(args: unknown) {
   }
 
   return {
-    content: [{
-      type: 'text' as const,
-      text: JSON.stringify({
-        success: failed < params.ids.length, // At least one succeeded
+    content: jsonContent({
+        success: failed === 0,
+        partial_success: failed > 0 && failed < params.ids.length,
+        status: failed === 0 ? 'success' : failed === params.ids.length ? 'failed' : 'partial_success',
         summary: {
           total: params.ids.length,
           installed,
@@ -117,7 +118,7 @@ export async function handleLibraryBatchInstall(args: unknown) {
           failed,
         },
         results,
-      }),
-    }],
+    }),
+    isError: failed === params.ids.length ? true : undefined,
   };
 }

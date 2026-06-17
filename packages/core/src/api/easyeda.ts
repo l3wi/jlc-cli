@@ -11,6 +11,7 @@ import {
   parseSymbolShapes,
   parseFootprintShapes,
 } from '../parsers/index.js';
+import { EasyEDAUuidSchema, LCSCPartNumberSchema } from '../utils/validation.js';
 
 const logger = createLogger('easyeda-api');
 
@@ -25,9 +26,10 @@ export class EasyEDAClient {
    * Fetch component data from EasyEDA API
    */
   async getComponentData(lcscPartNumber: string): Promise<EasyEDAComponentData | null> {
-    const url = API_ENDPOINT.replace('{lcsc_id}', lcscPartNumber);
+    const validatedLcscPartNumber = LCSCPartNumberSchema.parse(lcscPartNumber);
+    const url = API_ENDPOINT.replace('{lcsc_id}', validatedLcscPartNumber);
 
-    logger.debug(`Fetching component data for: ${lcscPartNumber}`);
+    logger.debug(`Fetching component data for: ${validatedLcscPartNumber}`);
 
     try {
       const responseText = await fetchWithCurlFallback(url) as string;
@@ -37,7 +39,7 @@ export class EasyEDAClient {
         return null;
       }
 
-      return this.parseComponentData(data.result, lcscPartNumber);
+      return this.parseComponentData(data.result, validatedLcscPartNumber);
     } catch (error) {
       logger.error(`Failed to fetch component ${lcscPartNumber}:`, error);
       throw error;
@@ -48,9 +50,10 @@ export class EasyEDAClient {
    * Download 3D model for a component
    */
   async get3DModel(uuid: string, format: 'step' | 'obj' = 'step'): Promise<Buffer | null> {
+    const validatedUuid = EasyEDAUuidSchema.parse(uuid);
     const url = format === 'step'
-      ? ENDPOINT_3D_MODEL_STEP.replace('{uuid}', uuid)
-      : ENDPOINT_3D_MODEL_OBJ.replace('{uuid}', uuid);
+      ? ENDPOINT_3D_MODEL_STEP.replace('{uuid}', validatedUuid)
+      : ENDPOINT_3D_MODEL_OBJ.replace('{uuid}', validatedUuid);
 
     try {
       const result = await fetchWithCurlFallback(url, { binary: true });

@@ -7,6 +7,7 @@ import * as p from '@clack/prompts';
 import chalk from 'chalk';
 import { createComponentService, createLibraryService, type SearchOptions } from '@jlcpcb/core';
 import { renderApp } from '../app/App.js';
+import { printJson, printJsonError, getErrorMessage } from '../utils/agent-output.js';
 
 const componentService = createComponentService();
 const libraryService = createLibraryService();
@@ -19,21 +20,39 @@ function isLcscId(id: string): boolean {
 interface InstallOptions {
   projectPath?: string;
   include3d?: boolean;
+  yes?: boolean;
+  json?: boolean;
   force?: boolean;
 }
 
 export async function installCommand(id: string | undefined, options: InstallOptions): Promise<void> {
+  if (!id && (options.yes || options.json)) {
+    if (options.json) {
+      printJsonError('missing_id', 'Direct install requires an LCSC part number');
+    } else {
+      p.log.error('Direct install requires an LCSC part number.');
+    }
+    process.exit(1);
+  }
+
   // Check if ID looks like an EasyEDA UUID (not an LCSC ID)
   if (id && !isLcscId(id)) {
+    if (options.json) {
+      printJsonError('invalid_lcsc_id', `"${id}" is not an LCSC part number`, {
+        details: { hint: `Use jlc easyeda install ${id}` },
+      });
+      process.exit(1);
+    }
+
     p.log.error(`"${id}" is not an LCSC part number (e.g., C2040).`);
     p.log.info(`For EasyEDA community components, use: ${chalk.cyan(`jlc easyeda install ${id}`)}`);
     process.exit(1);
   }
 
-  // If ID provided with --force, do direct install (non-interactive)
-  if (id && options.force) {
-    const spinner = p.spinner();
-    spinner.start(`Installing component ${id}...`);
+  // If ID provided with --yes or --json, do direct install (non-interactive).
+  if (id && (options.yes || options.json)) {
+    const spinner = options.json ? null : p.spinner();
+    spinner?.start(`Installing component ${id}...`);
 
     try {
       // Ensure libraries are set up
@@ -43,10 +62,18 @@ export async function installCommand(id: string | undefined, options: InstallOpt
       const result = await libraryService.install(id, {
         projectPath: options.projectPath,
         include3d: options.include3d,
-        force: true,
+        force: options.force,
       });
 
-      spinner.stop(chalk.green('✓ Component installed'));
+      spinner?.stop(chalk.green('✓ Component installed'));
+
+      if (options.json) {
+        printJson({
+          success: true,
+          result,
+        });
+        return;
+      }
 
       // Display result
       console.log();
@@ -59,8 +86,12 @@ export async function installCommand(id: string | undefined, options: InstallOpt
       console.log();
       console.log(chalk.dim(`Library: ${result.files.symbolLibrary}`));
     } catch (error) {
-      spinner.stop(chalk.red('✗ Installation failed'));
-      p.log.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      spinner?.stop(chalk.red('✗ Installation failed'));
+      if (options.json) {
+        printJsonError('install_failed', getErrorMessage(error), { retryable: true });
+      } else {
+        p.log.error(`Error: ${getErrorMessage(error)}`);
+      }
       process.exit(1);
     }
     return;

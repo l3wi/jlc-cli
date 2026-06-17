@@ -14,12 +14,17 @@ import {
   type SearchOptions,
 } from '@jlcpcb/core'
 import { renderApp } from '../app/App.js'
+import { printJson, printJsonError, getErrorMessage } from '../utils/agent-output.js'
+import { formatSearchResultForJson } from '../utils/search-result-output.js'
 
 const componentService = createComponentService()
 const libraryService = createLibraryService()
 
 interface EasyedaSearchOptions {
   port?: number
+  json?: boolean
+  open?: boolean
+  once?: boolean
 }
 
 /**
@@ -29,6 +34,25 @@ export async function easyedaSearchCommand(
   query: string,
   options: EasyedaSearchOptions
 ): Promise<void> {
+  if (options.json) {
+    try {
+      const results = await componentService.search(query, {
+        limit: 20,
+        source: 'easyeda-community',
+      })
+      printJson({
+        success: true,
+        query,
+        count: results.length,
+        results: results.map(formatSearchResultForJson),
+      })
+    } catch (error) {
+      printJsonError('easyeda_search_failed', getErrorMessage(error), { retryable: true })
+      process.exit(1)
+    }
+    return
+  }
+
   const port = options.port ?? 3847
 
   console.log('Starting component browser...')
@@ -41,8 +65,14 @@ export async function easyedaSearchCommand(
 
       console.log(`Browser opened at ${searchUrl}`)
 
-      // Open browser
-      await open(searchUrl)
+      if (options.open !== false) {
+        await open(searchUrl)
+      }
+
+      if (options.once) {
+        stopHttpServer()
+        process.exit(0)
+      }
 
       console.log('Press Ctrl+C to stop the server and exit')
     }
@@ -62,6 +92,8 @@ export async function easyedaSearchCommand(
 interface EasyedaInstallOptions {
   projectPath?: string
   include3d?: boolean
+  yes?: boolean
+  json?: boolean
   force?: boolean
 }
 
@@ -72,10 +104,19 @@ export async function easyedaInstallCommand(
   uuid: string | undefined,
   options: EasyedaInstallOptions
 ): Promise<void> {
-  // If UUID provided with --force, do direct install (non-interactive)
-  if (uuid && options.force) {
-    const spinner = p.spinner()
-    spinner.start(`Installing EasyEDA component ${uuid}...`)
+  if (!uuid && (options.yes || options.json)) {
+    if (options.json) {
+      printJsonError('missing_uuid', 'Direct EasyEDA install requires a component UUID')
+    } else {
+      p.log.error('Direct EasyEDA install requires a component UUID.')
+    }
+    process.exit(1)
+  }
+
+  // If UUID provided with --yes or --json, do direct install (non-interactive)
+  if (uuid && (options.yes || options.json)) {
+    const spinner = options.json ? null : p.spinner()
+    spinner?.start(`Installing EasyEDA component ${uuid}...`)
 
     try {
       // Ensure libraries are set up
@@ -85,10 +126,18 @@ export async function easyedaInstallCommand(
       const result = await libraryService.install(uuid, {
         projectPath: options.projectPath,
         include3d: options.include3d,
-        force: true,
+        force: options.force,
       })
 
-      spinner.stop(chalk.green('✓ Component installed'))
+      spinner?.stop(chalk.green('✓ Component installed'))
+
+      if (options.json) {
+        printJson({
+          success: true,
+          result,
+        })
+        return
+      }
 
       // Display result
       console.log()
@@ -101,8 +150,12 @@ export async function easyedaInstallCommand(
       console.log()
       console.log(chalk.dim(`Library: ${result.files.symbolLibrary}`))
     } catch (error) {
-      spinner.stop(chalk.red('✗ Installation failed'))
-      p.log.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      spinner?.stop(chalk.red('✗ Installation failed'))
+      if (options.json) {
+        printJsonError('easyeda_install_failed', getErrorMessage(error), { retryable: true })
+      } else {
+        p.log.error(`Error: ${getErrorMessage(error)}`)
+      }
       process.exit(1)
     }
     return

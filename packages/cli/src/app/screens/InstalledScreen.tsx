@@ -29,7 +29,7 @@ export function InstalledScreen() {
         </Text>
       </Box>
       <InstalledView
-        component={params.component}
+        component={{ ...params.component, lcscId: params.componentId }}
         result={result}
         error={params.error || null}
         terminalWidth={terminalWidth}

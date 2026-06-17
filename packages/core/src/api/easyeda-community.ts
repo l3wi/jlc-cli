@@ -16,6 +16,7 @@ import {
   parseSymbolShapes,
   parseFootprintShapes,
 } from '../parsers/index.js'
+import { EasyEDAUuidSchema } from '../utils/validation.js'
 
 const logger = createLogger('easyeda-community-api')
 
@@ -69,9 +70,10 @@ export class EasyEDACommunityClient {
    * Get full component details by UUID
    */
   async getComponent(uuid: string): Promise<EasyEDACommunityComponent | null> {
-    const url = `${API_COMPONENT_ENDPOINT}/${uuid}?version=${API_VERSION}&uuid=${uuid}`
+    const validatedUuid = EasyEDAUuidSchema.parse(uuid)
+    const url = `${API_COMPONENT_ENDPOINT}/${validatedUuid}?version=${API_VERSION}&uuid=${validatedUuid}`
 
-    logger.debug(`Fetching component: ${uuid}`)
+    logger.debug(`Fetching component: ${validatedUuid}`)
 
     try {
       const responseText = (await fetchWithCurlFallback(url)) as string
@@ -83,7 +85,7 @@ export class EasyEDACommunityClient {
 
       return this.parseComponent(data.result)
     } catch (error) {
-      logger.error(`Failed to fetch component ${uuid}:`, error)
+      logger.error(`Failed to fetch component ${validatedUuid}:`, error)
       throw error
     }
   }
@@ -95,10 +97,11 @@ export class EasyEDACommunityClient {
     uuid: string,
     format: 'step' | 'obj' = 'step'
   ): Promise<Buffer | null> {
+    const validatedUuid = EasyEDAUuidSchema.parse(uuid)
     const url =
       format === 'step'
-        ? ENDPOINT_3D_MODEL_STEP.replace('{uuid}', uuid)
-        : ENDPOINT_3D_MODEL_OBJ.replace('{uuid}', uuid)
+        ? ENDPOINT_3D_MODEL_STEP.replace('{uuid}', validatedUuid)
+        : ENDPOINT_3D_MODEL_OBJ.replace('{uuid}', validatedUuid)
 
     try {
       const result = await fetchWithCurlFallback(url, { binary: true })

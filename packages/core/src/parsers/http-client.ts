@@ -3,7 +3,7 @@
  * Used by both LCSC and Community API clients
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { createLogger } from '../utils/index.js';
 
 const logger = createLogger('http-client');
@@ -13,6 +13,7 @@ export interface FetchOptions {
   body?: string;
   contentType?: string;
   binary?: boolean;
+  timeoutMs?: number;
 }
 
 /**
@@ -24,6 +25,7 @@ export async function fetchWithCurlFallback(
   options: FetchOptions = {}
 ): Promise<string | Buffer> {
   const method = options.method || 'GET';
+  const timeoutMs = options.timeoutMs ?? 30_000;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
@@ -34,10 +36,13 @@ export async function fetchWithCurlFallback(
   }
 
   // Try native fetch first
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const fetchOptions: RequestInit = {
       method,
       headers,
+      signal: controller.signal,
     };
 
     if (options.body) {
@@ -54,38 +59,40 @@ export async function fetchWithCurlFallback(
     }
   } catch (error) {
     logger.debug(`Native fetch failed, falling back to curl: ${error}`);
+  } finally {
+    clearTimeout(timeout);
   }
 
   // Fallback to curl
   try {
-    const curlArgs = ['curl', '-s'];
+    const curlArgs = ['-sS', '--max-time', String(Math.ceil(timeoutMs / 1000))];
 
     if (method === 'POST') {
       curlArgs.push('-X', 'POST');
     }
 
-    curlArgs.push('-H', '"Accept: application/json"');
+    curlArgs.push('-H', 'Accept: application/json');
     curlArgs.push(
       '-H',
-      '"User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"'
+      'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'
     );
 
     if (options.contentType) {
-      curlArgs.push('-H', `"Content-Type: ${options.contentType}"`);
+      curlArgs.push('-H', `Content-Type: ${options.contentType}`);
     }
 
     if (options.body) {
-      curlArgs.push('-d', `'${options.body}'`);
+      curlArgs.push('-d', options.body);
     }
 
-    curlArgs.push(`"${url}"`);
+    curlArgs.push(url);
 
     if (options.binary) {
-      const result = execSync(curlArgs.join(' '), { maxBuffer: 50 * 1024 * 1024 });
+      const result = execFileSync('curl', curlArgs, { maxBuffer: 50 * 1024 * 1024 });
       return result;
     }
 
-    const result = execSync(curlArgs.join(' '), {
+    const result = execFileSync('curl', curlArgs, {
       encoding: 'utf-8',
       maxBuffer: 50 * 1024 * 1024,
     });

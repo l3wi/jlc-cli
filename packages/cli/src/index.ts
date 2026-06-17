@@ -6,34 +6,49 @@
  */
 
 import { Command } from 'commander';
+import { createRequire } from 'module';
 import { searchCommand } from './commands/search.js';
 import { infoCommand } from './commands/info.js';
 import { installCommand } from './commands/install.js';
 import { libraryCommand, regenerateCommand } from './commands/library.js';
 import { easyedaSearchCommand, easyedaInstallCommand } from './commands/easyeda.js';
 import { validateCommand } from './commands/validate.js';
+import { getErrorMessage } from './utils/agent-output.js';
+
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json');
 
 const program = new Command();
+
+function parsePositiveInt(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Expected a positive integer, got "${value}"`);
+  }
+  return parsed;
+}
 
 program
   .name('jlc')
   .description('JLC/EasyEDA component sourcing and KiCad library management')
-  .version('0.1.0');
+  .version(version);
 
 program
   .command('search <query...>')
   .description('Search for components (basic parts sorted first)')
-  .option('-l, --limit <number>', 'Maximum results', '20')
+  .option('-l, --limit <number>', 'Maximum results', parsePositiveInt, 20)
   .option('--in-stock', 'Only show in-stock components')
   .option('--basic-only', 'Only show basic parts (no extended)')
   .option('--community', 'Search EasyEDA community library')
+  .option('--json', 'Output clean JSON and do not launch the TUI')
   .action(async (queryParts: string[], options) => {
     const query = queryParts.join(' ');
     await searchCommand(query, {
-      limit: parseInt(options.limit, 10),
+      limit: options.limit,
       inStock: options.inStock,
       basicOnly: options.basicOnly || false,
       source: options.community ? 'easyeda-community' : 'lcsc',
+      json: options.json,
     });
   });
 
@@ -50,11 +65,15 @@ program
   .description('Install component to KiCad libraries')
   .option('-p, --project <path>', 'Install to project-local library')
   .option('--with-3d', 'Include 3D model')
+  .option('-y, --yes', 'Install directly without launching the TUI')
+  .option('--json', 'Output clean JSON and install directly')
   .option('-f, --force', 'Force reinstall (regenerate symbol and footprint)')
   .action(async (id, options) => {
     await installCommand(id, {
       projectPath: options.project,
       include3d: options.with3d,
+      yes: options.yes,
+      json: options.json,
       force: options.force,
     });
   });
@@ -114,11 +133,17 @@ const easyeda = program
 easyeda
   .command('search <query...>')
   .description('Open browser-based component search')
-  .option('-p, --port <number>', 'HTTP server port', '3847')
+  .option('-p, --port <number>', 'HTTP server port', parsePositiveInt, 3847)
+  .option('--json', 'Output clean JSON search results and do not open a browser')
+  .option('--no-open', 'Start the browser server without opening a browser')
+  .option('--once', 'Print the browser URL and exit after the server is ready')
   .action(async (queryParts: string[], options) => {
     const query = queryParts.join(' ');
     await easyedaSearchCommand(query, {
-      port: options.port ? parseInt(options.port, 10) : undefined,
+      port: options.port,
+      json: options.json,
+      open: options.open,
+      once: options.once,
     });
   });
 
@@ -127,13 +152,20 @@ easyeda
   .description('Install EasyEDA community component to KiCad libraries')
   .option('-p, --project <path>', 'Install to project-local library')
   .option('--with-3d', 'Include 3D model')
+  .option('-y, --yes', 'Install directly without launching the TUI')
+  .option('--json', 'Output clean JSON and install directly')
   .option('-f, --force', 'Force reinstall (regenerate symbol and footprint)')
   .action(async (uuid, options) => {
     await easyedaInstallCommand(uuid, {
       projectPath: options.project,
       include3d: options.with3d,
+      yes: options.yes,
+      json: options.json,
       force: options.force,
     });
   });
 
-program.parse();
+program.parseAsync().catch((error) => {
+  console.error(`Error: ${getErrorMessage(error)}`);
+  process.exit(1);
+});

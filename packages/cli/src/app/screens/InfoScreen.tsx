@@ -71,6 +71,7 @@ export function InfoScreen() {
 
   // Get datasheet URL (different field names in different types)
   const datasheetUrl = component && ('datasheetPdf' in component ? component.datasheetPdf : 'datasheet' in component ? component.datasheet : undefined);
+  const componentLcscId = component?.lcscId ?? params.componentId;
 
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -82,11 +83,11 @@ export function InfoScreen() {
     const lowerInput = input.toLowerCase();
 
     // R - Regenerate symbol and footprint
-    if (lowerInput === 'r' && installedInfo) {
+    if (lowerInput === 'r' && installedInfo && componentLcscId) {
       setIsRegenerating(true);
       setRegenerateMessage('Regenerating symbol and footprint...');
 
-      libraryService.install(component.lcscId, { force: true })
+      libraryService.install(componentLcscId, { force: true })
         .then((result) => {
           setRegenerateMessage(`✓ Regenerated: ${result.symbolAction}`);
           // Clear message after 2 seconds
@@ -127,6 +128,12 @@ export function InfoScreen() {
 
     // Enter - Install (only when not installed)
     if (key.return && !installedInfo) {
+      if (!componentLcscId) {
+        setRegenerateMessage('✗ Missing LCSC part number');
+        setTimeout(() => setRegenerateMessage(null), 3000);
+        return;
+      }
+
       if (checkingRef.current) return;
       checkingRef.current = true;
       setIsCheckingLibrary(true);
@@ -134,7 +141,7 @@ export function InfoScreen() {
       if (libraryStatus && (!libraryStatus.installed || !libraryStatus.linked)) {
         // Libraries not set up - show setup screen
         push('library-setup', {
-          componentId: component.lcscId,
+          componentId: componentLcscId,
           component,
         });
         setIsCheckingLibrary(false);
@@ -142,7 +149,7 @@ export function InfoScreen() {
       } else {
         // Libraries ready - proceed to install
         push('install', {
-          componentId: component.lcscId,
+          componentId: componentLcscId,
           component,
         });
         setIsCheckingLibrary(false);
@@ -176,18 +183,27 @@ export function InfoScreen() {
     );
   }
 
+  if (!componentLcscId) {
+    return (
+      <Box flexDirection="column">
+        <Text color="red">✗ Missing LCSC part number</Text>
+        <Text dimColor>Press Esc to go back</Text>
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
         <Text bold>
-          Component: <Text color="cyan">{component.lcscId}</Text>
+          Component: <Text color="cyan">{componentLcscId}</Text>
           {' '}
           <Text dimColor>({component.name})</Text>
           {installedInfo && <Text color="green"> ✓ Installed</Text>}
         </Text>
       </Box>
       <DetailView
-        component={component}
+        component={{ ...component, lcscId: componentLcscId }}
         terminalWidth={terminalWidth}
         isInstalled={!!installedInfo}
         installedInfo={installedInfo}

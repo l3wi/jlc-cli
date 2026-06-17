@@ -30,6 +30,7 @@ import {
   footprintConverter,
   symbolConverter,
 } from '@jlcpcb/core';
+import { printJson, printJsonError } from '../utils/agent-output.js';
 
 interface ValidateOptions {
   footprintOnly?: boolean;
@@ -130,46 +131,32 @@ export async function validateCommand(
   id: string | undefined,
   options: ValidateOptions
 ): Promise<void> {
+  if (options.footprintOnly && options.symbolOnly) {
+    if (options.json) {
+      printJsonError('invalid_options', '--footprint-only and --symbol-only are mutually exclusive');
+    } else {
+      p.log.error('--footprint-only and --symbol-only are mutually exclusive');
+    }
+    process.exit(1);
+  }
+
   const validateFootprint = !options.symbolOnly;
   const validateSymbol = !options.footprintOnly;
 
   // Single component validation
   if (id && !options.category && !options.all) {
-    const spinner = p.spinner();
-    spinner.start(`Validating ${id}...`);
+    const spinner = options.json ? null : p.spinner();
+    spinner?.start(`Validating ${id}...`);
 
     const result = await validateComponent(id, {
       footprint: validateFootprint,
       symbol: validateSymbol,
     });
 
-    spinner.stop(result.passed ? chalk.green('✓ Validation passed') : chalk.red('✗ Validation failed'));
+    spinner?.stop(result.passed ? chalk.green('✓ Validation passed') : chalk.red('✗ Validation failed'));
 
-    // Display results
-    console.log();
-    console.log(chalk.bold(`${result.componentName} (${result.lcscCode})`));
-    console.log(chalk.dim(`Duration: ${result.durationMs}ms`));
-    console.log();
+    let htmlPath: string | undefined;
 
-    if (result.error) {
-      console.log(chalk.red(`Error: ${result.error}`));
-      process.exit(1);
-    }
-
-    if (result.footprint) {
-      console.log(formatComparisonResult(result.footprint));
-    }
-
-    if (result.symbol) {
-      console.log(formatSymbolComparisonResult(result.symbol));
-    }
-
-    // JSON output
-    if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
-    }
-
-    // HTML output
     if (options.html) {
       const reference = await fetchReferenceSVG(id);
       const componentData = await easyedaClient.getComponentData(id);
@@ -195,8 +182,41 @@ export async function validateCommand(
 
       const html = generateValidationReport(result, svgs);
       writeFileSync(options.html, html);
-      console.log(chalk.dim(`HTML report: ${options.html}`));
+      htmlPath = options.html;
     }
+
+    if (options.json) {
+      printJson({
+        success: result.passed && !result.error,
+        result,
+        html: htmlPath,
+      });
+      process.exit(result.passed && !result.error ? 0 : 1);
+    }
+
+    // Display results
+    console.log();
+    console.log(chalk.bold(`${result.componentName} (${result.lcscCode})`));
+    console.log(chalk.dim(`Duration: ${result.durationMs}ms`));
+    console.log();
+
+    if (result.error) {
+      console.log(chalk.red(`Error: ${result.error}`));
+      process.exit(1);
+    }
+
+    if (result.footprint) {
+      console.log(formatComparisonResult(result.footprint));
+    }
+
+    if (result.symbol) {
+      console.log(formatSymbolComparisonResult(result.symbol));
+    }
+
+    if (htmlPath) {
+      console.log(chalk.dim(`HTML report: ${htmlPath}`));
+    }
+
 
     process.exit(result.passed ? 0 : 1);
   }
@@ -209,6 +229,11 @@ export async function validateCommand(
       : [];
 
   if (components.length === 0 && !id) {
+    if (options.json) {
+      printJsonError('missing_validation_target', 'JSON validation requires an id, --category, or --all');
+      process.exit(1);
+    }
+
     // Interactive category selection
     const categories = getCategoryNames();
     const selected = await p.select({
@@ -232,11 +257,22 @@ export async function validateCommand(
   components = components.filter((c) => !c.skip);
 
   if (components.length === 0) {
+    if (options.json) {
+      printJson({
+        success: true,
+        summary: { total: 0, passed: 0, failed: 0, errors: 0 },
+        results: [],
+      });
+      process.exit(0);
+    }
+
     p.log.warn('No components to validate');
     process.exit(0);
   }
 
-  console.log(chalk.bold(`\nValidating ${components.length} components...\n`));
+  if (!options.json) {
+    console.log(chalk.bold(`\nValidating ${components.length} components...\n`));
+  }
 
   const results: ValidationResult[] = [];
   let passed = 0;
@@ -244,7 +280,9 @@ export async function validateCommand(
   let errors = 0;
 
   for (const component of components) {
-    process.stdout.write(`  ${component.lcsc.padEnd(12)} ${component.name.slice(0, 40).padEnd(42)} `);
+    if (!options.json) {
+      process.stdout.write(`  ${component.lcsc.padEnd(12)} ${component.name.slice(0, 40).padEnd(42)} `);
+    }
 
     const result = await validateComponent(component.lcsc, {
       footprint: validateFootprint,
@@ -255,14 +293,36 @@ export async function validateCommand(
 
     if (result.error) {
       errors++;
-      console.log(chalk.yellow('⚠ ERROR'));
+      if (!options.json) console.log(chalk.yellow('⚠ ERROR'));
     } else if (result.passed) {
       passed++;
-      console.log(chalk.green('✓ PASS'));
+      if (!options.json) console.log(chalk.green('✓ PASS'));
     } else {
       failed++;
-      console.log(chalk.red('✗ FAIL'));
+      if (!options.json) console.log(chalk.red('✗ FAIL'));
     }
+  }
+
+  let htmlPath: string | undefined;
+  if (options.html) {
+    const html = generateBatchReport(results, 'JLC-CLI Validation Report');
+    writeFileSync(options.html, html);
+    htmlPath = options.html;
+  }
+
+  if (options.json) {
+    printJson({
+      success: failed === 0 && errors === 0,
+      summary: {
+        total: results.length,
+        passed,
+        failed,
+        errors,
+      },
+      results,
+      html: htmlPath,
+    });
+    process.exit(failed > 0 || errors > 0 ? 1 : 0);
   }
 
   // Summary
@@ -271,16 +331,8 @@ export async function validateCommand(
   console.log(`  ${chalk.green(`${passed} passed`)}  ${chalk.red(`${failed} failed`)}  ${chalk.yellow(`${errors} errors`)}`);
   console.log();
 
-  // JSON output
-  if (options.json) {
-    console.log(JSON.stringify(results, null, 2));
-  }
-
-  // HTML output
-  if (options.html) {
-    const html = generateBatchReport(results, 'JLC-CLI Validation Report');
-    writeFileSync(options.html, html);
-    console.log(chalk.dim(`HTML report: ${options.html}`));
+  if (htmlPath) {
+    console.log(chalk.dim(`HTML report: ${htmlPath}`));
   }
 
   process.exit(failed > 0 || errors > 0 ? 1 : 0);

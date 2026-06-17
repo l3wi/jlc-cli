@@ -47,13 +47,39 @@ export function createComponentService(): ComponentService {
     async search(query: string, options: SearchOptions = {}): Promise<ComponentSearchResult[]> {
       const { source = 'lcsc', limit = 20, inStock, basicOnly } = options;
 
+      if (source === 'all') {
+        const [lcscResults, communityResults] = await Promise.all([
+          jlcClient.search(query, { limit, inStock, basicOnly }),
+          easyedaCommunityClient.search({
+            query,
+            limit,
+          }),
+        ]);
+
+        return [
+          ...lcscResults,
+          ...communityResults.map(r => ({
+            id: r.uuid,
+            idType: 'easyeda_uuid' as const,
+            easyedaUuid: r.uuid,
+            name: r.title,
+            manufacturer: r.owner?.nickname || 'Community',
+            description: r.description || '',
+            package: r.package || '',
+            stock: 0,
+          })),
+        ].slice(0, limit);
+      }
+
       if (source === 'community' || source === 'easyeda-community') {
         const results = await easyedaCommunityClient.search({
           query,
           limit,
         });
         return results.map(r => ({
-          lcscId: r.uuid,
+          id: r.uuid,
+          idType: 'easyeda_uuid' as const,
+          easyedaUuid: r.uuid,
           name: r.title,
           manufacturer: r.owner?.nickname || 'Community',
           description: r.description || '',

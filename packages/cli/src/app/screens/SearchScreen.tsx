@@ -26,10 +26,17 @@ export function SearchScreen() {
     } else if (key.downArrow) {
       setSelectedIndex(Math.min(results.length - 1, selectedIndex + 1));
     } else if (key.return && results[selectedIndex]) {
-      push('info', {
-        componentId: results[selectedIndex].lcscId,
-        component: results[selectedIndex],
-      });
+      const selected = results[selectedIndex];
+      if (selected.idType === 'easyeda_uuid') {
+        push('easyeda-info', {
+          uuid: selected.easyedaUuid ?? selected.id,
+        });
+      } else {
+        push('info', {
+          componentId: selected.lcscId ?? selected.id,
+          component: selected,
+        });
+      }
     } else if (key.tab) {
       setIsSearching(true);
       const newFiltered = !isFiltered;

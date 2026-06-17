@@ -7,6 +7,7 @@ import * as p from '@clack/prompts';
 import chalk from 'chalk';
 import { createLibraryService, type InstalledComponent } from '@jlcpcb/core';
 import { renderApp } from '../app/App.js';
+import { printJson, printJsonError, getErrorMessage } from '../utils/agent-output.js';
 
 const libraryService = createLibraryService();
 
@@ -17,36 +18,25 @@ interface LibraryOptions {
 export async function libraryCommand(options: LibraryOptions): Promise<void> {
   // JSON mode - non-interactive output for scripting
   if (options.json) {
-    const spinner = p.spinner();
-    spinner.start('Loading library status...');
-
     try {
       const [status, components] = await Promise.all([
         libraryService.getStatus(),
         libraryService.listInstalled({}),
       ]);
 
-      spinner.stop(`Found ${components.length} installed components`);
-
-      console.log(
-        JSON.stringify(
-          {
-            status: {
-              installed: status.installed,
-              linked: status.linked,
-              version: status.version,
-              componentCount: status.componentCount,
-              paths: status.paths,
-            },
-            components,
-          },
-          null,
-          2
-        )
-      );
+      printJson({
+        success: true,
+        status: {
+          installed: status.installed,
+          linked: status.linked,
+          version: status.version,
+          componentCount: status.componentCount,
+          paths: status.paths,
+        },
+        components,
+      });
     } catch (error) {
-      spinner.stop('Failed to get library status');
-      p.log.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      printJsonError('library_status_failed', getErrorMessage(error), { retryable: false });
       process.exit(1);
     }
     return;

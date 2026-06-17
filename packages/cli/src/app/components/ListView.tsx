@@ -33,7 +33,7 @@ export function ListView({
         const row = formatListRow(r, widths);
 
         return (
-          <Box key={r.lcscId}>
+          <Box key={r.id ?? r.lcscId}>
             <Text color="cyan">{isSelected ? '▶' : '  '}</Text>
             {isSelected ? (
               <Text inverse>

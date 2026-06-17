@@ -24,6 +24,7 @@ import {
   detectKicadVersion,
 } from '@jlcpcb/core';
 import { join } from 'path';
+import { jsonContent, toolError } from '../tool-response.js';
 
 // 3rd party library namespace
 const LIBRARY_NAMESPACE = 'jlc_mcp';
@@ -227,7 +228,7 @@ export async function handleUpdateLibrary(args: unknown) {
           },
           libraries_created: createdLibraries,
           next_steps: [
-            'Use library_fetch to add components to your libraries',
+            'Use library_install to add components to your libraries',
             'Run library_update again after adding components to regenerate with latest data',
           ],
         }, null, 2),
@@ -247,17 +248,9 @@ export async function handleUpdateLibrary(args: unknown) {
   }
 
   if (allLcscIds.size === 0) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
-          success: false,
-          error: 'No LCSC IDs found in existing libraries',
-          libraries_scanned: libraryFiles.length,
-        }),
-      }],
-      isError: true,
-    };
+    return toolError('no_lcsc_ids_found', 'No LCSC IDs found in existing libraries', {
+      details: { libraries_scanned: libraryFiles.length },
+    });
   }
 
   // Process each component
@@ -369,10 +362,10 @@ export async function handleUpdateLibrary(args: unknown) {
   // Compact response - summary only, no detailed failures
   // (failures can be retrieved separately if needed)
   return {
-    content: [{
-      type: 'text' as const,
-      text: JSON.stringify({
-        success: true,
+    content: jsonContent({
+        success: failed.length === 0,
+        partial_success: failed.length > 0 && successful.length > 0,
+        status: failed.length === 0 ? 'success' : successful.length === 0 ? 'failed' : 'partial_success',
         dry_run: params.dry_run,
         summary: {
           total: allLcscIds.size,
@@ -387,7 +380,7 @@ export async function handleUpdateLibrary(args: unknown) {
           error: f.error,
         })),
         has_more_failures: failed.length > 5,
-      }),
-    }],
+    }),
+    isError: successful.length === 0 && failed.length > 0 ? true : undefined,
   };
 }

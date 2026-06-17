@@ -1,5 +1,17 @@
 # @jlcpcb/core
 
+## 0.4.0
+
+### Minor Changes
+
+- Improve agent-facing CLI and MCP contracts.
+  - Add clean JSON output modes for CLI search, info, install, EasyEDA, library, and validation commands.
+  - Add direct non-interactive install flows with `--yes` while keeping `--force` scoped to reinstall behavior.
+  - Use discriminated component result IDs for LCSC and EasyEDA community parts.
+  - Return structured MCP errors and explicit partial-success statuses.
+  - Harden EasyEDA HTTP fallback execution and validate component IDs before URL construction.
+  - Avoid artifact writes during no-op installs when a symbol already exists.
+
 ## 0.3.1
 
 ### Patch Changes

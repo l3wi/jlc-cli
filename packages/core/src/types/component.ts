@@ -44,7 +44,10 @@ export interface ComponentSelection {
 }
 
 export interface ComponentSearchResult {
-  lcscId: string;
+  id: string;
+  idType: 'lcsc' | 'easyeda_uuid';
+  lcscId?: string;
+  easyedaUuid?: string;
   name: string;
   manufacturer: string;
   package: string;

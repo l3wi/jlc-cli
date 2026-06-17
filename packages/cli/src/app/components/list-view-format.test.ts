@@ -13,6 +13,8 @@ function createResult(
   overrides: Partial<ComponentSearchResult>
 ): ComponentSearchResult {
   return {
+    id: 'C123',
+    idType: 'lcsc',
     lcscId: 'C123',
     name: 'LM2940CT-5.0/NOPB',
     description:

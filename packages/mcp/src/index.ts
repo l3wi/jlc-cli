@@ -20,6 +20,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { tools, toolHandlers } from './tools/index.js';
+import { errorPayloadFromUnknown, toolError } from './tool-response.js';
 import { createLogger, ensureGlobalLibraryTables, startHttpServer } from '@jlcpcb/core';
 
 const require = createRequire(import.meta.url);
@@ -55,20 +56,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const handler = toolHandlers[name];
 
   if (!handler) {
-    return {
-      content: [{ type: 'text', text: `Unknown tool: ${name}` }],
-      isError: true,
-    };
+    return toolError('unknown_tool', `Unknown tool: ${name}`);
   }
 
   try {
     return await handler(args);
   } catch (error) {
     logger.error(`Tool error: ${name}`, error);
+    const structuredError = errorPayloadFromUnknown(error);
     return {
       content: [{
         type: 'text',
-        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        text: JSON.stringify({
+          success: false,
+          error: structuredError,
+        }),
       }],
       isError: true,
     };

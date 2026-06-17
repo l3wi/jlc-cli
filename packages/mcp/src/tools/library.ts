@@ -6,7 +6,8 @@
 import { z } from 'zod';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getLibraryService } from '../services.js';
-import { LcscIdSchema, SafePathSchema, isLcscId } from '../schemas.js';
+import { LcscIdSchema, SafePathSchema } from '../schemas.js';
+import { jsonContent, toolError } from '../tool-response.js';
 
 // Tool Definitions
 
@@ -16,7 +17,7 @@ export const libraryInstallTool: Tool = {
 
 Accepts:
 - LCSC part numbers (e.g., C2040) → global JLC-MCP libraries
-- EasyEDA UUIDs (e.g., 8007c710c0b9406db963b55df6990340) → project-local EasyEDA library (requires project_path)
+- EasyEDA UUIDs (e.g., 8007c710c0b9406db963b55df6990340) → EasyEDA global library or project-local library
 
 LCSC components are routed to category-based global libraries:
 - JLC-MCP-Resistors.kicad_sym, JLC-MCP-Capacitors.kicad_sym, JLC-MCP-ICs.kicad_sym, etc.
@@ -32,11 +33,11 @@ Returns symbol_ref and footprint_ref for use with schematic placement.`,
       },
       project_path: {
         type: 'string',
-        description: 'Project path (required for EasyEDA UUIDs, optional for LCSC IDs)',
+        description: 'Optional project path. If omitted, installs to the global KiCad third-party library.',
       },
       include_3d: {
         type: 'boolean',
-        description: 'Include 3D model if available (default: false)',
+        description: 'Include 3D model if available (default: true)',
       },
       force: {
         type: 'boolean',
@@ -84,23 +85,6 @@ export const LibraryGetComponentParamsSchema = z.object({
 
 export async function handleLibraryInstall(args: unknown) {
   const params = LibraryInstallParamsSchema.parse(args);
-  const isCommunityComponent = !isLcscId(params.id);
-
-  // Community components require project_path
-  if (isCommunityComponent && !params.project_path) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
-          success: false,
-          error: 'EasyEDA community components require project_path for local storage',
-          id: params.id,
-          hint: 'Provide project_path to store in <project>/libraries/EasyEDA.*',
-        }),
-      }],
-      isError: true,
-    };
-  }
 
   try {
     const result = await getLibraryService().install(params.id, {
@@ -111,11 +95,10 @@ export async function handleLibraryInstall(args: unknown) {
 
     // Compact response - essential data only
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
+      content: jsonContent({
           success: true,
           id: params.id,
+          id_type: result.source === 'lcsc' ? 'lcsc' : 'easyeda_uuid',
           installed: true,
           symbol_ref: result.symbolRef,
           footprint_ref: result.footprintRef,
@@ -132,21 +115,13 @@ export async function handleLibraryInstall(args: unknown) {
             has_power_pins: result.validationData.checks.has_power_pins,
             has_ground_pins: result.validationData.checks.has_ground_pins,
           } : undefined,
-        }),
-      }],
+      }),
     };
   } catch (error) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-          id: params.id,
-        }),
-      }],
-      isError: true,
-    };
+    return toolError('library_install_failed', error instanceof Error ? error.message : 'Unknown error', {
+      retryable: true,
+      details: { id: params.id },
+    });
   }
 }
 
@@ -157,17 +132,9 @@ export async function handleLibraryGetComponent(args: unknown) {
     // Check if component is installed
     const status = await getLibraryService().getStatus();
     if (!status.installed) {
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            success: false,
-            error: 'JLC-MCP libraries not installed. Run library_install first.',
-            id: params.id,
-          }),
-        }],
-        isError: true,
-      };
+      return toolError('library_not_installed', 'JLC-MCP libraries not installed. Run library_install first.', {
+        details: { id: params.id },
+      });
     }
 
     // Get list of installed components
@@ -175,25 +142,14 @@ export async function handleLibraryGetComponent(args: unknown) {
     const component = installed.find(c => c.lcscId === params.id);
 
     if (!component) {
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            success: false,
-            error: `Component ${params.id} is not installed`,
-            id: params.id,
-            hint: 'Use library_install to add this component first',
-          }),
-        }],
-        isError: true,
-      };
+      return toolError('component_not_installed', `Component ${params.id} is not installed`, {
+        details: { id: params.id, hint: 'Use library_install to add this component first' },
+      });
     }
 
     // Return metadata only (no file contents)
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
+      content: jsonContent({
           success: true,
           id: params.id,
           installed: true,
@@ -203,20 +159,11 @@ export async function handleLibraryGetComponent(args: unknown) {
           symbol_library: component.library,
           name: component.name,
           has_3d_model: component.has3dModel,
-        }),
-      }],
+      }),
     };
   } catch (error) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-          id: params.id,
-        }),
-      }],
-      isError: true,
-    };
+    return toolError('library_get_component_failed', error instanceof Error ? error.message : 'Unknown error', {
+      details: { id: params.id },
+    });
   }
 }
