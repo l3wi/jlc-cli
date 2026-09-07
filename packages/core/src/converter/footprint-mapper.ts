@@ -37,37 +37,22 @@ const PASSIVE_LIBRARIES: Record<string, string> = {
 const PASSIVE_PAD_COUNT = 2;
 
 /**
- * Normalize package name for matching
- * - Uppercase
- * - Remove common variations in naming
+ * Accept complete chip-package identities, never a size substring in a part name.
+ * Optional metric dimensions must agree with the imperial code.
  */
-function normalizePackageName(name: string): string {
-  return name
-    .toUpperCase()
-    .replace(/[_\s-]+/g, '-')
-    .replace(/\(.*?\)/g, '') // Remove parenthetical info like "(1608)"
-    .trim();
-}
-
-/**
- * Extract imperial size code from package name
- * Handles variations like "0603", "SMD0603", "LED0603-RD", "0603(1608)"
- */
-function extractSmdSize(packageName: string): string | null {
-  const normalized = normalizePackageName(packageName);
-
-  // Direct match
-  for (const size of Object.keys(SMD_SIZES)) {
-    if (normalized === size || normalized === `SMD${size}`) {
-      return size;
-    }
-  }
-
-  // Pattern match for sizes anywhere in name
-  // Allows prefixes like LED, SMD, etc. and suffixes like -RD, -BL
-  const sizePattern = /(0201|0402|0603|0805|1206|1210|1812|2010|2512)(?![0-9])/;
-  const match = normalized.match(sizePattern);
-  return match ? match[1] : null;
+function extractSmdSize(packageName: string, prefix: string): string | null {
+  const match = packageName.trim().toUpperCase().match(
+    /^(?:(SMD|[RCL])[-_\s]*)?(\d{4})(?:\s*\(\s*(\d{4})\s*\)|[-_\s]+(\d{4})(?:[-_\s]*METRIC)?)?$/
+  );
+  if (!match || (match[1] && match[1] !== 'SMD' && match[1] !== prefix)) return null;
+  const size = match[2];
+  const dimensions = SMD_SIZES[size];
+  if (!dimensions) return null;
+  const metric = match[3] || match[4];
+  if (metric && metric !== dimensions.metric) return null;
+  // KiCad has resistor/inductor footprints for these sizes, but no matching C_* library entries.
+  if (prefix === 'C' && (size === '2010' || size === '2512')) return null;
+  return size;
 }
 
 /**
@@ -83,19 +68,17 @@ function extractSmdSize(packageName: string): string | null {
 export function mapToKicadFootprint(
   packageName: string,
   componentPrefix: string,
-  _category?: string,
-  _description?: string
+  category?: string,
+  description?: string
 ): FootprintMapping | null {
-  const prefix = componentPrefix.toUpperCase();
+  const prefix = componentPrefix.trim().toUpperCase().replace(/\?$/, '');
 
-  // ONLY allow built-in footprints for 2-pad passives (R, C, L)
-  // These are safe because the pads are functionally interchangeable
-  if (!PASSIVE_LIBRARIES[prefix]) {
-    return null;
-  }
+  if (!PASSIVE_LIBRARIES[prefix]) return null;
+  // A capacitor reference designator alone does not establish interchangeable terminals.
+  const polarized = /\b(?:tantalum|electrolytic|polari[sz]ed)\b/i;
+  if (polarized.test(category || '') || polarized.test(description || '')) return null;
 
-  // Check for standard SMD passive sizes
-  const smdSize = extractSmdSize(packageName);
+  const smdSize = extractSmdSize(packageName, prefix);
   if (smdSize) {
     const sizeInfo = SMD_SIZES[smdSize];
     const library = PASSIVE_LIBRARIES[prefix];
@@ -139,6 +122,5 @@ export function getKicadFootprintRef(mapping: FootprintMapping): string {
  * Check if a package is likely a standard passive that can use KiCad footprints
  */
 export function isStandardPassive(packageName: string, prefix: string): boolean {
-  const smdSize = extractSmdSize(packageName);
-  return smdSize !== null && PASSIVE_LIBRARIES[prefix.toUpperCase()] !== undefined;
+  return mapToKicadFootprint(packageName, prefix) !== null;
 }

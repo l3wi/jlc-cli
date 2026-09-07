@@ -1,5 +1,19 @@
 # @jlcpcb/cli
 
+## 0.4.1
+
+### Patch Changes
+
+- Remove the 50 mm symbol tolerance and report blocking pin validation errors with explicit scope in JSON, text, and HTML; preserve failures for intentional templates and incomplete source metadata.
+- Bundle corrected browser pad/drill rendering, complete symbol curves and fills, and visible property placement for off-origin symbols.
+- Apply corrected footprint geometry and conservative standard-package substitution during installation and regeneration.
+- Fail footprint validation on manufacturing differences or unverified geometry, and check batch fixture identities against live part/package metadata.
+
+- Preserve destination, force, and 3D options throughout LCSC and community interactive installation.
+- Keep search constraints and filtered results when toggling filters or returning from component details.
+- Handle Escape once, discard abandoned setup work, and return from completed setup and installation to component details.
+- Exit unsuccessfully for regeneration failures and report missing requested validation references as failures.
+
 ## 0.4.0
 
 ### Minor Changes

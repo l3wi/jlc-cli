@@ -120,7 +120,7 @@ export async function easyedaInstallCommand(
 
     try {
       // Ensure libraries are set up
-      await libraryService.ensureGlobalTables()
+      if (!options.projectPath) await libraryService.ensureGlobalTables()
 
       // Install the component
       const result = await libraryService.install(uuid, {
@@ -161,10 +161,10 @@ export async function easyedaInstallCommand(
     return
   }
 
-  // If UUID provided (without --force), launch TUI to fetch and display
+  // If UUID provided, launch TUI to fetch and display.
   if (uuid) {
     // Launch TUI at EasyEDA info screen - let it fetch the component
-    await renderApp('easyeda-info', { uuid })
+    await renderApp('easyeda-info', { uuid, installOptions: options })
     return
   }
 
@@ -198,5 +198,5 @@ export async function easyedaInstallCommand(
 
   // Clear the "Searching..." line and launch interactive UI
   process.stdout.write('\x1b[1A\x1b[2K')
-  await renderApp('search', { query: query as string, results })
+  await renderApp('search', { query: query as string, results, searchOptions, installOptions: options })
 }

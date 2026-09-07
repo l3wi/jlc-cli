@@ -76,21 +76,12 @@ const modalClose = document.getElementById('modal-close') as HTMLButtonElement
 
 // Initialize
 function init() {
-  // Check for server-injected query first
-  const initialQuery = (window as unknown as { __INITIAL_QUERY__?: string }).__INITIAL_QUERY__
-  if (initialQuery) {
-    searchInput.value = initialQuery
-    currentQuery = initialQuery
+  const params = new URLSearchParams(window.location.search)
+  const query = params.get('q')
+  if (query) {
+    searchInput.value = query
+    currentQuery = query
     performSearch()
-  } else {
-    // Fallback to URL param
-    const params = new URLSearchParams(window.location.search)
-    const q = params.get('q')
-    if (q) {
-      searchInput.value = q
-      currentQuery = q
-      performSearch()
-    }
   }
 
   // Event listeners

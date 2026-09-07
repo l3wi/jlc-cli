@@ -14,14 +14,24 @@ import { KICAD_VERSIONS, type KiCadVersion } from '../constants/kicad.js';
  */
 export function detectKicadVersion(): KiCadVersion {
   const home = homedir();
-  const baseDir = join(home, 'Documents', 'KiCad');
+  const baseDir = platform() === 'linux'
+    ? join(home, '.local', 'share', 'kicad')
+    : join(home, 'Documents', 'KiCad');
 
   for (const version of KICAD_VERSIONS) {
-    if (existsSync(join(baseDir, version))) {
+    if (existsSync(join(baseDir, version)) || existsSync(getKicadConfigDir(version))) {
       return version;
     }
   }
   return '9.0';
+}
+
+/**
+ * Get the portable environment variable for the selected KiCad version's libraries.
+ */
+export function getKicadThirdPartyVariable(version?: KiCadVersion): string {
+  const majorVersion = (version ?? detectKicadVersion()).split('.')[0];
+  return `\${KICAD${majorVersion}_3RD_PARTY}`;
 }
 
 /**
@@ -33,10 +43,13 @@ export function getKicadConfigDir(version?: KiCadVersion): string {
   const home = homedir();
   const plat = platform();
 
-  if (plat === 'linux') {
-    return join(home, '.local', 'share', 'kicad', v);
+  if (plat === 'darwin') {
+    return join(home, 'Library', 'Preferences', 'kicad', v);
   }
-  return join(home, 'Documents', 'KiCad', v);
+  if (plat === 'win32') {
+    return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'kicad', v);
+  }
+  return join(home, '.config', 'kicad', v);
 }
 
 /**

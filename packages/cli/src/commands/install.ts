@@ -56,7 +56,7 @@ export async function installCommand(id: string | undefined, options: InstallOpt
 
     try {
       // Ensure libraries are set up
-      await libraryService.ensureGlobalTables();
+      if (!options.projectPath) await libraryService.ensureGlobalTables();
 
       // Install the component
       const result = await libraryService.install(id, {
@@ -97,7 +97,7 @@ export async function installCommand(id: string | undefined, options: InstallOpt
     return;
   }
 
-  // If ID provided (without --force), fetch component and launch TUI for install
+  // If ID provided, fetch component and launch TUI for install.
   if (id) {
     console.log(`Fetching component ${id}...`);
 
@@ -105,7 +105,7 @@ export async function installCommand(id: string | undefined, options: InstallOpt
       const details = await componentService.getDetails(id);
       // Clear the "Fetching..." line and launch interactive UI
       process.stdout.write('\x1b[1A\x1b[2K');
-      await renderApp('info', { componentId: id, component: details as any });
+      await renderApp('info', { componentId: id, component: details, installOptions: options });
     } catch (error) {
       console.error(`Failed to fetch component: ${error instanceof Error ? error.message : 'Unknown error'}`);
       process.exit(1);
@@ -147,5 +147,5 @@ export async function installCommand(id: string | undefined, options: InstallOpt
 
   // Clear the "Searching..." line and launch interactive UI
   process.stdout.write('\x1b[1A\x1b[2K');
-  await renderApp('search', { query: query as string, results });
+  await renderApp('search', { query: query as string, results, searchOptions, installOptions: options });
 }

@@ -22,6 +22,7 @@ interface DetailViewProps {
   component: DetailViewComponent;
   terminalWidth: number;
   isInstalled?: boolean;
+  canInstall?: boolean;
   installedInfo?: InstalledComponent | null;
   statusMessage?: string | null;
 }
@@ -36,7 +37,7 @@ function truncate(str: string, len: number): string {
   return str.length > len ? str.slice(0, len - 1) + '…' : str;
 }
 
-export function DetailView({ component, terminalWidth, isInstalled, installedInfo, statusMessage }: DetailViewProps) {
+export function DetailView({ component, terminalWidth, isInstalled, canInstall = !isInstalled, installedInfo, statusMessage }: DetailViewProps) {
   const isWide = terminalWidth >= 80;
   const labelWidth = 16;
   // In wide mode, split into two columns with gap; otherwise full width
@@ -140,10 +141,12 @@ export function DetailView({ component, terminalWidth, isInstalled, installedInf
     </Box>
   ) : null;
 
-  // Footer text based on installation status
-  const footerText = isInstalled
-    ? 'R Regenerate • D Delete • O Datasheet • Esc Back'
-    : 'Enter Install • O Datasheet • Esc Back';
+  const footerText = [
+    ...(canInstall ? ['Enter Install'] : []),
+    ...(isInstalled ? ['R Regenerate', 'D Delete'] : []),
+    'O Datasheet',
+    'Esc Back',
+  ].join(' • ');
 
   return (
     <Box flexDirection="column" width="100%">

@@ -6,11 +6,11 @@
 import { existsSync } from 'fs';
 import { readFile, readdir, unlink } from 'fs/promises';
 import { homedir, platform } from 'os';
-import { join, basename } from 'path';
+import { join } from 'path';
 
 import type { EasyEDAComponentData, EasyEDACommunityComponent } from '../types/index.js';
 import type { LibraryCategory } from '../converter/category-router.js';
-import { ensureDir, writeText, writeBinary, detectKicadVersion } from '../utils/index.js';
+import { ensureDir, writeText, writeBinary, detectKicadVersion, getKicadThirdPartyVariable, getKicadConfigDir, childExpressions } from '../utils/index.js';
 import { easyedaClient } from '../api/easyeda.js';
 import { easyedaCommunityClient } from '../api/easyeda-community.js';
 import { jlcClient } from '../api/jlc.js';
@@ -174,10 +174,10 @@ export interface LibraryService {
   remove(lcscId: string, options?: RemoveOptions): Promise<RemoveResult>;
   ensureGlobalTables(): Promise<void>;
   getStatus(): Promise<LibraryStatus>;
-  isEasyEDAInstalled(componentName: string): Promise<boolean>;
+  isEasyEDAInstalled(componentName: string, projectPath?: string): Promise<boolean>;
 }
 
-interface LibraryPaths {
+export interface LibraryPaths {
   base: string;
   symbolsDir: string;
   footprintsDir: string;
@@ -186,16 +186,16 @@ interface LibraryPaths {
   models3dFullDir: string;
 }
 
-function getGlobalLibraryPaths(): LibraryPaths {
-  const home = homedir();
-  const version = detectKicadVersion();
-  const plat = platform();
-
+export function getLibraryPaths(projectPath?: string): LibraryPaths {
   let base: string;
-  if (plat === 'linux') {
-    base = join(home, '.local', 'share', 'kicad', version, '3rdparty', LIBRARY_NAMESPACE);
+  if (projectPath) {
+    base = join(projectPath, 'libraries');
   } else {
-    base = join(home, 'Documents', 'KiCad', version, '3rdparty', LIBRARY_NAMESPACE);
+    const home = homedir();
+    const version = detectKicadVersion();
+    base = platform() === 'linux'
+      ? join(home, '.local', 'share', 'kicad', version, '3rdparty', LIBRARY_NAMESPACE)
+      : join(home, 'Documents', 'KiCad', version, '3rdparty', LIBRARY_NAMESPACE);
   }
 
   return {
@@ -208,37 +208,37 @@ function getGlobalLibraryPaths(): LibraryPaths {
   };
 }
 
-function getProjectLibraryPaths(projectPath: string): LibraryPaths {
-  const librariesDir = join(projectPath, 'libraries');
-
-  return {
-    base: librariesDir,
-    symbolsDir: join(librariesDir, 'symbols'),
-    footprintsDir: join(librariesDir, 'footprints'),
-    models3dDir: join(librariesDir, '3dmodels'),
-    footprintDir: join(librariesDir, 'footprints', FOOTPRINT_LIBRARY_NAME),
-    models3dFullDir: join(librariesDir, '3dmodels', MODELS_3D_NAME),
-  };
-}
 
 function isLcscId(id: string): boolean {
   return /^C\d+$/.test(id);
 }
 
-function getKicadConfigDir(version: string): string {
-  const home = homedir();
-  const plat = platform();
 
-  if (plat === 'darwin') {
-    return join(home, 'Library', 'Preferences', 'kicad', version);
-  } else if (plat === 'win32') {
-    return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'kicad', version);
-  } else {
-    return join(home, '.config', 'kicad', version);
+
+function unescapeAtom(value: string): string {
+  return value.replace(/\\([\s\S])/g, '$1');
+}
+
+function* librarySymbols(content: string) {
+  for (const range of childExpressions(content)) {
+    const block = content.slice(range.start, range.end);
+    const match = block.match(/^\(\s*symbol\s+"((?:\\[\s\S]|[^"\\])*)"/);
+    if (!match) continue;
+    const fullName = unescapeAtom(match[1]);
+    const name = fullName.slice(fullName.indexOf(':') + 1);
+    let lcscId = '';
+    let footprintRef = '';
+    for (const propertyRange of childExpressions(block)) {
+      const property = block.slice(propertyRange.start, propertyRange.end)
+        .match(/^\(\s*property\s+"((?:\\[\s\S]|[^"\\])*)"\s+"((?:\\[\s\S]|[^"\\])*)"/);
+      if (!property) continue;
+      if (property[1] === 'LCSC') lcscId = unescapeAtom(property[2]);
+      else if (property[1] === 'Footprint') footprintRef = unescapeAtom(property[2]);
+    }
+    yield { ...range, name, lcscId, footprintRef };
   }
 }
 
-// Parse .kicad_sym file to extract installed components
 async function parseSymbolLibrary(
   filePath: string,
   libraryName: string,
@@ -249,54 +249,17 @@ async function parseSymbolLibrary(
 
   try {
     const content = await readFile(filePath, 'utf-8');
-
-    // Match symbol definitions: (symbol "JLC-MCP-Resistors:R_100k" ...)
-    const symbolPattern = /\(symbol\s+"([^"]+)"\s+/g;
-    const lcscPattern = /\(property\s+"LCSC"\s+"(C\d+)"/g;
-    const footprintPattern = /\(property\s+"Footprint"\s+"([^"]+)"/g;
-
-    // Split by symbol definitions to process each
-    const symbols = content.split(/(?=\(symbol\s+"[^"]+"\s+\()/);
-
-    for (const symbolBlock of symbols) {
-      // Skip header block
-      if (!symbolBlock.includes('(symbol "')) continue;
-
-      // Extract symbol name
-      const symbolMatch = symbolBlock.match(/\(symbol\s+"([^"]+)"/);
-      if (!symbolMatch) continue;
-
-      const fullSymbolRef = symbolMatch[1];
-      // Skip if this is a subsymbol (contains _1_1, _0_1, etc.)
-      if (fullSymbolRef.includes('_') && /_(0|1)_(0|1)$/.test(fullSymbolRef)) continue;
-
-      // Extract LCSC ID
-      const lcscMatch = symbolBlock.match(/\(property\s+"LCSC"\s+"(C\d+)"/);
-      const lcscId = lcscMatch ? lcscMatch[1] : '';
-
-      // Extract name from symbol ref (after the colon)
-      const nameParts = fullSymbolRef.split(':');
-      const name = nameParts.length > 1 ? nameParts[1] : fullSymbolRef;
-
-      // Extract footprint reference
-      const fpMatch = symbolBlock.match(/\(property\s+"Footprint"\s+"([^"]+)"/);
-      const footprintRef = fpMatch ? fpMatch[1] : '';
-
-      // Check for 3D model
-      const model3dPath = join(models3dDir, `${name}.step`);
-      const has3dModel = existsSync(model3dPath);
-
-      if (lcscId) {
-        components.push({
-          lcscId,
-          name,
-          category,
-          symbolRef: fullSymbolRef,
-          footprintRef,
-          library: libraryName,
-          has3dModel,
-        });
-      }
+    for (const { name, lcscId, footprintRef } of librarySymbols(content)) {
+      if (!/^C\d+$/.test(lcscId)) continue;
+      components.push({
+        lcscId,
+        name,
+        category,
+        symbolRef: `${libraryName}:${name}`,
+        footprintRef,
+        library: libraryName,
+        has3dModel: existsSync(join(models3dDir, `${name}.step`)),
+      });
     }
   } catch {
     // File read error - return empty
@@ -305,51 +268,24 @@ async function parseSymbolLibrary(
   return components;
 }
 
-// Remove a symbol from a .kicad_sym library file
 function removeSymbolFromLibrary(content: string, symbolName: string): string {
-  // Find the main symbol block (not subsymbols like _0_1, _1_1)
-  // Symbol format: (symbol "LibName:SymbolName" ...nested content...)
-  const lines = content.split('\n');
-  const result: string[] = [];
-  let depth = 0;
-  let inTargetSymbol = false;
-  let symbolStartDepth = 0;
-
-  for (const line of lines) {
-    // Count parentheses to track nesting depth
-    const openCount = (line.match(/\(/g) || []).length;
-    const closeCount = (line.match(/\)/g) || []).length;
-
-    // Check if this line starts a symbol we want to remove
-    // Match both "LibName:SymbolName" and just "SymbolName" formats
-    const symbolMatch = line.match(/^\s*\(symbol\s+"([^"]+)"/);
-    if (symbolMatch && !inTargetSymbol) {
-      const fullRef = symbolMatch[1];
-      const nameOnly = fullRef.includes(':') ? fullRef.split(':')[1] : fullRef;
-      // Match main symbol or its subsymbols
-      if (nameOnly === symbolName || nameOnly.startsWith(`${symbolName}_`)) {
-        inTargetSymbol = true;
-        symbolStartDepth = depth;
-        depth += openCount - closeCount;
-        continue; // Skip this line
-      }
+  for (const symbol of librarySymbols(content)) {
+    if (symbol.name === symbolName) {
+      return content.slice(0, symbol.start) + content.slice(symbol.end);
     }
-
-    if (inTargetSymbol) {
-      depth += openCount - closeCount;
-      // Check if we've closed the symbol block
-      if (depth <= symbolStartDepth) {
-        inTargetSymbol = false;
-      }
-      continue; // Skip lines inside the symbol
-    }
-
-    depth += openCount - closeCount;
-    result.push(line);
   }
+  return content;
+}
 
-  // Clean up extra blank lines
-  return result.join('\n').replace(/\n{3,}/g, '\n\n');
+async function isFootprintReferenced(symbolsDir: string, footprintRef: string): Promise<boolean> {
+  for (const filename of await readdir(symbolsDir)) {
+    if (!filename.endsWith('.kicad_sym')) continue;
+    const content = await readFile(join(symbolsDir, filename), 'utf-8');
+    for (const symbol of librarySymbols(content)) {
+      if (symbol.footprintRef === footprintRef) return true;
+    }
+  }
+  return false;
 }
 
 function adaptCommunityComponent(component: EasyEDACommunityComponent): EasyEDAComponentData {
@@ -450,9 +386,7 @@ export function createLibraryService(): LibraryService {
 
       // Determine storage location (global if no projectPath provided)
       const isGlobal = !options.projectPath;
-      const paths = isGlobal
-        ? getGlobalLibraryPaths()
-        : getProjectLibraryPaths(options.projectPath!);
+      const paths = getLibraryPaths(options.projectPath);
 
       // Fetch component data
       let component: EasyEDAComponentData | null = null;
@@ -513,22 +447,9 @@ export function createLibraryService(): LibraryService {
         const libDesc = isGlobal ? EASYEDA_LIBRARY_DESCRIPTION : EASYEDA_LOCAL_LIBRARY_DESCRIPTION;
         const models3dDirName = isGlobal ? 'EasyEDA.3dshapes' : 'EasyEDA-local.3dshapes';
 
-        let symbolsDir: string;
-        let easyedaModelsDir: string;
-
-        if (isGlobal) {
-          // Global: use KiCad 3rd party directory
-          symbolsDir = paths.symbolsDir;
-          footprintDir = join(paths.footprintsDir, fpLibDir);
-          easyedaModelsDir = join(paths.models3dDir, models3dDirName);
-        } else {
-          // Project-local
-          const librariesDir = join(options.projectPath!, 'libraries');
-          symbolsDir = join(librariesDir, 'symbols');
-          footprintDir = join(librariesDir, 'footprints', fpLibDir);
-          easyedaModelsDir = join(librariesDir, '3dmodels', models3dDirName);
-        }
-        models3dDir = easyedaModelsDir;
+        const symbolsDir = paths.symbolsDir;
+        footprintDir = join(paths.footprintsDir, fpLibDir);
+        models3dDir = join(paths.models3dDir, models3dDirName);
 
         await ensureDir(symbolsDir);
         await ensureDir(footprintDir);
@@ -542,7 +463,7 @@ export function createLibraryService(): LibraryService {
 
         if (!options.force && existsSync(symbolFile)) {
           const existingContent = await readFile(symbolFile, 'utf-8');
-          if (symbolConverter.symbolExistsInLibrary(existingContent, component.info.name)) {
+          if (symbolConverter.symbolExistsInLibrary(existingContent, symbolName)) {
             return {
               success: true,
               id,
@@ -579,7 +500,7 @@ export function createLibraryService(): LibraryService {
             await writeBinary(modelPath, model);
             // Use appropriate path variable
             if (isGlobal) {
-              modelRelativePath = `\${KICAD9_3RD_PARTY}/${LIBRARY_NAMESPACE}/3dmodels/${models3dDirName}/${modelFilename}`;
+              modelRelativePath = `${getKicadThirdPartyVariable()}/${LIBRARY_NAMESPACE}/3dmodels/${models3dDirName}/${modelFilename}`;
             } else {
               modelRelativePath = `\${KIPRJMOD}/libraries/3dmodels/${models3dDirName}/${modelFilename}`;
             }
@@ -625,7 +546,7 @@ export function createLibraryService(): LibraryService {
 
         if (!options.force && existsSync(symbolFile)) {
           const existingContent = await readFile(symbolFile, 'utf-8');
-          if (symbolConverter.symbolExistsInLibrary(existingContent, component.info.name)) {
+          if (symbolConverter.symbolExistsInLibrary(existingContent, symbolName)) {
             const existingFootprintResult = footprintConverter.getFootprint(component);
             if (existingFootprintResult.type === 'reference') {
               footprintRef = existingFootprintResult.reference!;
@@ -676,8 +597,9 @@ export function createLibraryService(): LibraryService {
             const modelFilename = `${symbolName}.step`;
             modelPath = join(models3dDir, modelFilename);
             await writeBinary(modelPath, model);
-            // Use KiCad variable for portable path
-            modelRelativePath = `\${KICAD9_3RD_PARTY}/${LIBRARY_NAMESPACE}/3dmodels/${MODELS_3D_NAME}/${modelFilename}`;
+            modelRelativePath = isGlobal
+              ? `${getKicadThirdPartyVariable()}/${LIBRARY_NAMESPACE}/3dmodels/${MODELS_3D_NAME}/${modelFilename}`
+              : `\${KIPRJMOD}/libraries/3dmodels/${MODELS_3D_NAME}/${modelFilename}`;
           }
         }
 
@@ -699,7 +621,7 @@ export function createLibraryService(): LibraryService {
 
         // Update lib tables (project-local only)
         if (!isGlobal && options.projectPath) {
-          await ensureSymLibTable(options.projectPath, symbolFile);
+          await ensureSymLibTable(options.projectPath, symbolFile, symbolLibraryFilename.slice(0, -'.kicad_sym'.length));
           await ensureFpLibTable(options.projectPath, footprintDir);
         }
       }
@@ -711,11 +633,11 @@ export function createLibraryService(): LibraryService {
       if (existsSync(symbolFile)) {
         const existingContent = await readFile(symbolFile, 'utf-8');
 
-        if (symbolConverter.symbolExistsInLibrary(existingContent, component.info.name)) {
+        if (symbolConverter.symbolExistsInLibrary(existingContent, symbolName)) {
           if (options.force) {
             // Force reinstall - replace existing symbol
             symbolContent = symbolConverter.replaceInLibrary(existingContent, component, {
-              libraryName: isCommunityComponent ? EASYEDA_LIBRARY_NAME : undefined,
+              libraryName: isCommunityComponent ? (isGlobal ? EASYEDA_LIBRARY_NAME : EASYEDA_LOCAL_LIBRARY_NAME) : undefined,
               symbolName: isCommunityComponent ? symbolName : undefined,
             });
             symbolAction = 'replaced';
@@ -725,14 +647,14 @@ export function createLibraryService(): LibraryService {
           }
         } else {
           symbolContent = symbolConverter.appendToLibrary(existingContent, component, {
-            libraryName: isCommunityComponent ? EASYEDA_LIBRARY_NAME : undefined,
+            libraryName: isCommunityComponent ? (isGlobal ? EASYEDA_LIBRARY_NAME : EASYEDA_LOCAL_LIBRARY_NAME) : undefined,
             symbolName: isCommunityComponent ? symbolName : undefined,
           });
           symbolAction = 'appended';
         }
       } else {
         symbolContent = symbolConverter.convert(component, {
-          libraryName: isCommunityComponent ? EASYEDA_LIBRARY_NAME : undefined,
+          libraryName: isCommunityComponent ? (isGlobal ? EASYEDA_LIBRARY_NAME : EASYEDA_LOCAL_LIBRARY_NAME) : undefined,
           symbolName: isCommunityComponent ? symbolName : undefined,
         });
         symbolAction = 'created';
@@ -774,9 +696,7 @@ export function createLibraryService(): LibraryService {
     },
 
     async listInstalled(options: ListOptions = {}): Promise<InstalledComponent[]> {
-      const paths = options.projectPath
-        ? getProjectLibraryPaths(options.projectPath)
-        : getGlobalLibraryPaths();
+      const paths = getLibraryPaths(options.projectPath);
 
       const allComponents: InstalledComponent[] = [];
       const categories = getAllCategories();
@@ -815,7 +735,7 @@ export function createLibraryService(): LibraryService {
 
     async getStatus(): Promise<LibraryStatus> {
       const version = detectKicadVersion();
-      const paths = getGlobalLibraryPaths();
+      const paths = getLibraryPaths();
       const configDir = getKicadConfigDir(version);
 
       const symLibTablePath = join(configDir, 'sym-lib-table');
@@ -862,9 +782,9 @@ export function createLibraryService(): LibraryService {
       };
     },
 
-    async isEasyEDAInstalled(componentName: string): Promise<boolean> {
-      const paths = getGlobalLibraryPaths();
-      const easyedaLibPath = join(paths.symbolsDir, EASYEDA_SYMBOL_LIBRARY_NAME);
+    async isEasyEDAInstalled(componentName: string, projectPath?: string): Promise<boolean> {
+      const paths = getLibraryPaths(projectPath);
+      const easyedaLibPath = join(paths.symbolsDir, projectPath ? EASYEDA_LOCAL_SYMBOL_LIBRARY_NAME : EASYEDA_SYMBOL_LIBRARY_NAME);
 
       if (!existsSync(easyedaLibPath)) {
         return false;
@@ -874,9 +794,10 @@ export function createLibraryService(): LibraryService {
         const content = await readFile(easyedaLibPath, 'utf-8');
         // Sanitize the name the same way we do when installing
         const sanitizedName = componentName.replace(/[^a-zA-Z0-9_-]/g, '_');
-        // Check if symbol exists in library
-        const pattern = new RegExp(`\\(symbol\\s+"${sanitizedName}"`, 'm');
-        return pattern.test(content);
+        for (const symbol of librarySymbols(content)) {
+          if (symbol.name === sanitizedName) return true;
+        }
+        return false;
       } catch {
         return false;
       }
@@ -937,9 +858,7 @@ export function createLibraryService(): LibraryService {
     },
 
     async remove(lcscId: string, options: RemoveOptions = {}): Promise<RemoveResult> {
-      const paths = options.projectPath
-        ? getProjectLibraryPaths(options.projectPath)
-        : getGlobalLibraryPaths();
+      const paths = getLibraryPaths(options.projectPath);
 
       // Find the component in the installed list
       const installed = await this.listInstalled({ projectPath: options.projectPath });
@@ -965,11 +884,13 @@ export function createLibraryService(): LibraryService {
         const content = await readFile(symbolLibPath, 'utf-8');
         const newContent = removeSymbolFromLibrary(content, component.name);
         await writeText(symbolLibPath, newContent);
-        result.symbolRemoved = true;
+        result.symbolRemoved = newContent !== content;
       }
 
-      // Remove custom footprint if it exists (JLC-MCP: prefix)
-      if (component.footprintRef?.startsWith('JLC-MCP:')) {
+      // Other libraries may share generated footprints, including symbols without an LCSC ID.
+      const footprintIsShared = component.footprintRef.startsWith('JLC-MCP:')
+        && await isFootprintReferenced(paths.symbolsDir, component.footprintRef);
+      if (result.symbolRemoved && component.footprintRef.startsWith('JLC-MCP:') && !footprintIsShared) {
         const fpName = component.footprintRef.split(':')[1];
         const footprintPath = join(paths.footprintDir, `${fpName}.kicad_mod`);
         if (existsSync(footprintPath)) {
@@ -979,7 +900,7 @@ export function createLibraryService(): LibraryService {
       }
 
       // Remove 3D model if it exists
-      if (component.has3dModel) {
+      if (result.symbolRemoved && component.has3dModel && !footprintIsShared) {
         const modelPath = join(paths.models3dFullDir, `${component.name}.step`);
         if (existsSync(modelPath)) {
           await unlink(modelPath);

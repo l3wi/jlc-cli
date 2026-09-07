@@ -10,8 +10,8 @@ export function InstalledScreen() {
   const { params } = useCurrentScreen() as { screen: 'installed'; params: InstalledParams };
   const { columns: terminalWidth } = useTerminalSize();
 
-  useInput(() => {
-    pop();
+  useInput((_input, key) => {
+    if (!key.escape) pop();
   });
 
   const result = params.result

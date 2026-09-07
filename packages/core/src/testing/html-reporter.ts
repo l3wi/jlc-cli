@@ -141,7 +141,7 @@ export function generateBatchReport(
             <th>LCSC</th>
             <th>Component</th>
             <th>Footprint</th>
-            <th>Symbol</th>
+            <th>Symbol pins</th>
             <th>Status</th>
             <th>Duration</th>
           </tr>
@@ -229,7 +229,8 @@ function generateSymbolSection(result: SymbolComparisonResult): string {
 
   return `
     <section class="validation-section symbol">
-      <h2>Symbol Validation <span class="${statusClass}">${result.passed ? '✓' : '✗'}</span></h2>
+      <h2>Symbol Pin Validation <span class="${statusClass}">${result.passed ? '✓' : '✗'}</span></h2>
+      <p>Checks pin ${result.coverage.pinNamesCompared ? 'numbers and names' : 'numbers (names explicitly excluded)'}, relative position, direction, and electrical metadata. Body graphics, text, and pin lengths require separate visual inspection. Standardized symbols may intentionally differ from the source geometry.</p>
 
       <div class="stats-grid">
         <div class="stat-item">

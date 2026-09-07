@@ -339,7 +339,8 @@ export function parsePad(data: string): EasyEDAPad | null {
       id: f[12] || '',
       holeLength: safeParseFloat(f[13]),
       holePoint: f[14] || '',
-      isPlated: parseBool(f[15]),
+      // Legacy PAD records omit plating; explicit N/false must remain non-plated.
+      isPlated: !/^(?:N|NO|FALSE|0)$/i.test(f[15] || ''),
       isLocked: parseBool(f[16]),
     };
   } catch {
@@ -512,6 +513,7 @@ export function parseSolidRegion(data: string): EasyEDASolidRegion | null {
     if (!path || path.length < 3) return null;
     return {
       layerId: safeParseInt(f[1], 1),
+      net: f[2] || '',
       path,
       fillType: f[4] || 'solid',
       id: f[5] || '',
@@ -610,43 +612,18 @@ export function parseSymbolShapes(shapes: string[]): ParsedSymbolData {
   };
 }
 
-/**
- * Associate pinpart text labels with pins to extract descriptive names
- * Looks for patterns like "J1/T+" → pin 1, "J2/T-" → pin 2
- * Also handles format "1CT:1" (center tap), "Green/Yellow" (LED colors)
- */
-function associatePinNamesFromTexts(pins: EasyEDAPin[], texts: EasyEDASymbolText[]): void {
-  // Get pinpart texts only
-  const pinpartTexts = texts.filter(t => t.isPinPart && t.text.trim());
-
-  for (const text of pinpartTexts) {
-    const textContent = text.text.trim();
-
-    // Try to match "Jn" or "Jn/..." pattern (common for connectors)
-    // Examples: "J1/T+", "J2/T-", "J3/R+", "J4", "J5"
-    const jMatch = textContent.match(/^J(\d+)(?:\/(.+))?$/i);
-    if (jMatch) {
-      const pinNum = jMatch[1];
-      const pinFunction = jMatch[2] || textContent; // Use full text if no function suffix
-
-      // Find the pin with this number
-      const pin = pins.find(p => p.number === pinNum);
-      if (pin && (!pin.name || pin.name === pinNum)) {
-        // Set the pin name to the descriptive function (e.g., "T+" for TX+, or full "J1/T+")
-        pin.name = pinFunction || textContent;
-      }
-      continue;
-    }
-
-    // Try to match just a number (for simple numbered pins)
-    const numMatch = textContent.match(/^(\d+)$/);
-    if (numMatch) {
-      // Don't override - this is just a pin number, not a name
-      continue;
-    }
-
-    // For other patterns like "1CT:1", "Green", "Yellow", etc.
-    // These are decorative labels, not pin names - skip them
+/** Resolve explicit pinpart labels such as J1/T+ without overriding an existing name. */
+export function associatePinNamesFromTexts(
+  pins: Pick<EasyEDAPin, 'number' | 'name'>[],
+  texts: Pick<EasyEDASymbolText, 'isPinPart' | 'text'>[],
+): void {
+  for (const text of texts) {
+    if (!text.isPinPart) continue;
+    const content = text.text.trim();
+    const match = content.match(/^J(\d+)(?:\/(.+))?$/i);
+    if (!match) continue;
+    const pin = pins.find(p => p.number === match[1]);
+    if (pin && (!pin.name || pin.name === match[1])) pin.name = match[2] || content;
   }
 }
 
@@ -727,9 +704,8 @@ export function parseFootprintShapes(shapes: string[]): ParsedFootprintData {
     }
   }
 
-  // Determine type based on pads
-  // Check both holeRadius > 0 and isPlated polygon pads (EasyEDA often has holeRadius=0 for polygon THT)
-  const type = pads.some(p => p.holeRadius > 0 || (p.shape === 'POLYGON' && p.isPlated)) ? 'tht' : 'smd';
+  // Copper on a polygon does not imply a drilled pad.
+  const type = pads.some(p => p.holeRadius > 0) || vias.length > 0 ? 'tht' : 'smd';
 
   return {
     name: 'Unknown', // Will be set by caller

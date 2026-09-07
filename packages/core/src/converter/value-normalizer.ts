@@ -25,9 +25,10 @@ const PATTERNS = {
   // "16k", "16kOhm", "16K OHM", "16000", "4.7k", "0R1" (0.1 ohm)
   resistor: /(\d+(?:\.\d+)?)\s*([kKmMgGrR]?)\s*(?:ohm|Ohm|OHM|Ω|R)?/i,
 
-  // Capacitors: Match value with unit and optional voltage
-  // "100nF 50V", "10uF", "100pF", "1000uF/16V"
-  capacitor: /(\d+(?:\.\d+)?)\s*([pnuμmM]?)[Ff]?\s*(?:[\/\s]*(\d+)\s*[Vv])?/i,
+  // Prefer explicit farad units over shorthand, never a bare voltage/package number.
+  // "100nF 50V", "10uF", "100pF", "1000uF/16V", "100n"
+  capacitor: /(?:^|[^a-z0-9.])(\d+(?:\.\d+)?|\.\d+)\s*([pnuμµm]?)f(?![a-z0-9])/i,
+  capacitorShorthand: /(?:^|[^a-z0-9.])(\d+(?:\.\d+)?|\.\d+)\s*([pnuμµm])(?![a-z0-9])/i,
 
   // Inductors: Match value with unit and optional current
   // "10uH 2A", "100nH", "4.7mH"
@@ -147,14 +148,15 @@ function normalizeResistor(description: string): NormalizedValue {
  * Normalize capacitor value
  */
 function normalizeCapacitor(description: string): NormalizedValue {
-  const match = description.match(PATTERNS.capacitor);
+  const match = description.match(PATTERNS.capacitor) || description.match(PATTERNS.capacitorShorthand);
 
   if (!match) {
     return { displayValue: description, originalValue: description };
   }
 
-  const [, value, unit, voltage] = match;
-  const normalizedUnit = MULTIPLIER_MAP[unit] || unit;
+  const [, value, unit] = match;
+  const normalizedUnit = unit === 'µ' ? 'u' : (MULTIPLIER_MAP[unit] || unit.toLowerCase());
+  const voltage = description.match(PATTERNS.voltage)?.[1];
 
   let displayValue = `${value}${normalizedUnit}`;
 
@@ -251,7 +253,7 @@ export function extractDisplayValue(
   // For passives, prefer to extract from description which has more detail
   if (description && (type === 'resistor' || type === 'capacitor' || type === 'inductor')) {
     const normalized = normalizeValue(description, type);
-    if (normalized.displayValue !== description) {
+    if (normalized.params?.value !== undefined) {
       return normalized.displayValue;
     }
   }

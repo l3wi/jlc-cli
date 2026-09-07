@@ -34,6 +34,12 @@ export interface TestComponent {
   expectedPadCount?: number;
   /** Expected pin count for symbol (optional) */
   expectedPinCount?: number;
+  /** Verified source manufacturer part number; detects fixture identity drift. */
+  expectedMpn?: string;
+  /** Verified source footprint package name; detects mislabeled coverage. */
+  expectedPackage?: string;
+  /** Exact known source/template discrepancies; tests assert them, CLI validation still fails. */
+  expectedSymbolErrors?: Pick<PinDiff, 'pinNumber' | 'field' | 'expected' | 'actual'>[];
   /** Skip this component in CI (e.g., known issues) */
   skip?: boolean;
   /** Notes about this test case */
@@ -73,6 +79,17 @@ export interface ReferenceSVG {
 
 export type PadShape = 'rect' | 'circle' | 'oval' | 'polygon' | 'roundrect' | 'custom';
 
+export interface DrillInfo {
+  /** Full drill dimensions in mm, in its local frame (equal for a round drill). */
+  width: number;
+  height: number;
+  /** Offset from the pad/hole anchor in its local frame, in mm. */
+  offsetX: number;
+  offsetY: number;
+  /** KiCad rotation in degrees, relative to the pad/hole frame. */
+  rotation: number;
+}
+
 export interface PadInfo {
   /** Pad number/name (e.g., '1', '2', 'GND') */
   number: string;
@@ -94,6 +111,14 @@ export interface PadInfo {
   holeRadius?: number;
   /** Rotation in degrees */
   rotation?: number;
+  /** Actual custom copper outline in pad-local coordinates, in mm. */
+  polygon?: Array<{ x: number; y: number }>;
+  /** Roundrect corner radius in mm. */
+  cornerRadius?: number;
+  /** Full drill geometry; holeRadius alone cannot describe slots or offsets. */
+  drill?: DrillInfo;
+  /** Required for pads with a drill; never inferred from copper layer. */
+  plated?: boolean;
 }
 
 export interface ViaInfo {
@@ -105,6 +130,8 @@ export interface ViaInfo {
   outerDiameter: number;
   /** Hole diameter in mm */
   holeDiameter: number;
+  /** Full copper/drill description, including non-circular unnamed plated pads. */
+  pad?: PadInfo;
 }
 
 export interface HoleInfo {
@@ -116,12 +143,16 @@ export interface HoleInfo {
   diameter: number;
   /** Is this a plated hole */
   plated: boolean;
+  drill?: DrillInfo;
+  rotation?: number;
 }
 
 export interface FootprintData {
   pads: PadInfo[];
   vias: ViaInfo[];
   holes: HoleInfo[];
+  /** Missing or unsupported manufacturing evidence. Any issue blocks a pass. */
+  issues?: string[];
   /** Bounding box */
   bounds: {
     minX: number;
@@ -147,25 +178,28 @@ export type PinElectrical =
   | 'power_out'
   | 'open_collector'
   | 'open_emitter'
-  | 'no_connect';
+  | 'no_connect'
+  | 'unknown';
 
 export interface PinInfo {
   /** Pin number (e.g., '1', '2') */
   number: string;
   /** Pin name (e.g., 'VCC', 'GND', 'PA0') */
   name: string;
-  /** X position */
+  /** X connection position in millimetres */
   x: number;
-  /** Y position */
+  /** Y connection position in millimetres (positive upwards) */
   y: number;
-  /** Rotation in degrees (0, 90, 180, 270) */
+  /** KiCad inward pin direction in degrees, normalized modulo 360 */
   rotation: number;
-  /** Electrical type */
+  /** Declared electrical type; unknown is not equivalent to unspecified/passive. */
   electrical?: PinElectrical;
 }
 
 export interface SymbolData {
   pins: PinInfo[];
+  /** Missing or unsupported pin evidence. Any issue blocks a pass. */
+  issues?: string[];
   /** Bounding box */
   bounds: {
     minX: number;
@@ -183,7 +217,7 @@ export type DiffSeverity = 'error' | 'warning' | 'info';
 
 export interface PadDiff {
   padNumber: string;
-  field: 'position' | 'size' | 'shape' | 'hole' | 'missing' | 'extra';
+  field: 'position' | 'size' | 'shape' | 'hole' | 'layer' | 'plating' | 'coverage' | 'missing' | 'extra';
   severity: DiffSeverity;
   message: string;
   expected?: string | number;
@@ -192,7 +226,7 @@ export interface PadDiff {
 
 export interface PinDiff {
   pinNumber: string;
-  field: 'position' | 'name' | 'rotation' | 'electrical' | 'missing' | 'extra';
+  field: 'position' | 'name' | 'rotation' | 'electrical' | 'identity' | 'coverage' | 'missing' | 'extra';
   severity: DiffSeverity;
   message: string;
   expected?: string | number;
@@ -227,6 +261,13 @@ export interface FootprintComparisonResult {
 export interface SymbolComparisonResult {
   /** Overall pass/fail */
   passed: boolean;
+  /** Scope of this pin comparison, not a full symbol graphics validation. */
+  coverage: {
+    pinNamesCompared: boolean;
+    bodyGraphicsCompared: false;
+    pinLengthsCompared: false;
+    pinStylesCompared: false;
+  };
   /** Pin count matches */
   pinCountMatch: boolean;
   /** Reference pin count */
@@ -263,17 +304,17 @@ export interface ValidationResult {
 // =============================================================================
 
 export interface ComparisonOptions {
-  /** Position tolerance in mm (default: 0.05) */
+  /** Position tolerance in mm (default/maximum: 0.05; may only be tightened) */
   positionTolerance?: number;
   /** Size tolerance in mm (default: 0.02) */
   sizeTolerance?: number;
   /** Hole size tolerance in mm (default: 0.02) */
   holeTolerance?: number;
-  /** Treat size differences as warnings instead of errors */
+  /** Legacy option; manufacturing and symbol pin errors are never downgraded. */
   sizeWarningsOnly?: boolean;
-  /** Ignore extra pads in generated output */
+  /** Legacy option; extra pads and symbol pins always fail. */
   ignoreExtraPads?: boolean;
-  /** Ignore pin name differences */
+  /** Explicitly exclude pin name differences; recorded in symbol result coverage. */
   ignorePinNames?: boolean;
 }
 

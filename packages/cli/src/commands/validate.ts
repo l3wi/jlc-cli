@@ -18,7 +18,6 @@ import {
   formatSymbolComparisonResult,
   generateValidationReport,
   generateBatchReport,
-  TEST_CATEGORIES,
   getAllTestComponents,
   getTestComponentsByCategory,
   getCategoryNames,
@@ -26,6 +25,7 @@ import {
   renderSymbolSvg,
   type ValidationResult,
   type ReportSvgs,
+  type TestComponent,
   easyedaClient,
   footprintConverter,
   symbolConverter,
@@ -46,7 +46,8 @@ interface ValidateOptions {
  */
 async function validateComponent(
   lcscCode: string,
-  options: { footprint: boolean; symbol: boolean }
+  options: { footprint: boolean; symbol: boolean },
+  identity?: Pick<TestComponent, 'expectedMpn' | 'expectedPackage'>
 ): Promise<ValidationResult> {
   const startTime = Date.now();
   const normalizedCode = lcscCode.replace(/^C/i, '');
@@ -70,9 +71,18 @@ async function validateComponent(
         error: 'Failed to fetch component data from EasyEDA',
       };
     }
+    if (identity?.expectedMpn !== undefined && componentData.info.name !== identity.expectedMpn) {
+      throw new Error(`Fixture MPN differs: expected ${identity.expectedMpn}, got ${componentData.info.name}`);
+    }
+    if (identity?.expectedPackage !== undefined && componentData.footprint.name !== identity.expectedPackage) {
+      throw new Error(`Fixture package differs: expected ${identity.expectedPackage}, got ${componentData.footprint.name}`);
+    }
 
     let footprintResult = null;
     let symbolResult = null;
+    const missingReferences: string[] = [];
+    if (options.footprint && !reference.footprintSvg) missingReferences.push('footprint');
+    if (options.symbol && !reference.symbolSvg) missingReferences.push('symbol');
 
     // Validate footprint
     if (options.footprint && reference.footprintSvg) {
@@ -81,10 +91,7 @@ async function validateComponent(
       const refData = extractFromReferenceSVG(reference.footprintSvg);
       const genData = extractFromKiCadFootprint(kicadContent);
 
-      footprintResult = compareFootprints(refData, genData, {
-        sizeWarningsOnly: true,
-        positionTolerance: 50,
-      });
+      footprintResult = compareFootprints(refData, genData);
     }
 
     // Validate symbol
@@ -96,12 +103,11 @@ async function validateComponent(
       const refData = extractSymbolFromReferenceSVG(reference.symbolSvg);
       const genData = extractFromKiCadSymbol(kicadContent);
 
-      symbolResult = compareSymbols(refData, genData, {
-        positionTolerance: 50,
-      });
+      symbolResult = compareSymbols(refData, genData);
     }
 
     const passed =
+      missingReferences.length === 0 &&
       (!footprintResult || footprintResult.passed) && (!symbolResult || symbolResult.passed);
 
     return {
@@ -112,6 +118,9 @@ async function validateComponent(
       symbol: symbolResult,
       timestamp: new Date(),
       durationMs: Date.now() - startTime,
+      ...(missingReferences.length > 0
+        ? { error: `Missing reference SVG: ${missingReferences.join(', ')}` }
+        : {}),
     };
   } catch (error) {
     return {
@@ -287,13 +296,13 @@ export async function validateCommand(
     const result = await validateComponent(component.lcsc, {
       footprint: validateFootprint,
       symbol: validateSymbol,
-    });
+    }, component);
 
     results.push(result);
 
     if (result.error) {
       errors++;
-      if (!options.json) console.log(chalk.yellow('⚠ ERROR'));
+      if (!options.json) console.log(chalk.yellow(`ERROR: ${result.error}`));
     } else if (result.passed) {
       passed++;
       if (!options.json) console.log(chalk.green('✓ PASS'));

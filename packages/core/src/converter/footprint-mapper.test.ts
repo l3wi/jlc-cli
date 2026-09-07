@@ -40,13 +40,6 @@ describe('mapToKicadFootprint', () => {
       });
     });
 
-    it('extracts size from complex package names', () => {
-      const result = mapToKicadFootprint('LED0805-RD', 'R');
-      expect(result).toEqual({
-        library: 'Resistor_SMD',
-        footprint: 'R_0805_2012Metric',
-      });
-    });
 
     it('handles lowercase prefix', () => {
       const result = mapToKicadFootprint('0603', 'r');
@@ -95,10 +88,29 @@ describe('mapToKicadFootprint', () => {
       expect(result).toBeNull();
     });
 
-    it('ignores category and description parameters', () => {
-      // These are kept for API compatibility but not used in conservative approach
-      const result = mapToKicadFootprint('SOIC-8', 'X', 'Transistors', 'NPN Transistor');
-      expect(result).toBeNull();
+    it('rejects polarized capacitor metadata despite a chip-size name', () => {
+      expect(mapToKicadFootprint('1206', 'C?', 'Tantalum Capacitors')).toBeNull();
+      expect(mapToKicadFootprint('1206', 'C', undefined, 'Polarized capacitor')).toBeNull();
+    });
+
+    it('normalizes EasyEDA designators and checks metric decorations', () => {
+      expect(mapToKicadFootprint('C0603', 'C?')?.footprint).toBe('C_0603_1608Metric');
+      expect(mapToKicadFootprint('R_0603_1608Metric', 'R?')?.footprint).toBe('R_0603_1608Metric');
+      expect(mapToKicadFootprint('0603(1608)', 'R')?.footprint).toBe('R_0603_1608Metric');
+      expect(mapToKicadFootprint('0603(1005)', 'R')).toBeNull();
+    });
+
+    it('rejects ambiguous metric codes, embedded sizes and conflicting package identities', () => {
+      for (const name of ['C0603Metric', 'C10603', 'LED0805-RD', 'CUSTOM-0603', 'R0603']) {
+        expect(mapToKicadFootprint(name, 'C')).toBeNull();
+        expect(isStandardPassive(name, 'C')).toBe(false);
+      }
+    });
+
+    it('does not return nonexistent capacitor library entries', () => {
+      expect(mapToKicadFootprint('2010', 'C')).toBeNull();
+      expect(mapToKicadFootprint('2512', 'C')).toBeNull();
+      expect(mapToKicadFootprint('2512', 'R')?.footprint).toBe('R_2512_6332Metric');
     });
   });
 });

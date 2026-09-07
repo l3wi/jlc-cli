@@ -68,7 +68,6 @@ const FOOTPRINT_COLORS = {
 
 // Scale factor: KiCad uses mm, we render with pixels per mm
 const SYMBOL_SCALE = 10   // pixels per mm for symbols
-const FOOTPRINT_SCALE = 20 // pixels per mm for footprints
 
 interface BoundingBox {
   minX: number
@@ -117,6 +116,11 @@ export function renderSymbolSvg(sexpr: string): string {
 
     // Find all symbol units (graphics and pins)
     const units = findChildren(parsed, 'symbol')
+    const pinNames = findChild(parsed, 'pin_names')
+    const pinNumbers = findChild(parsed, 'pin_numbers')
+    for (const property of findChildren(parsed, 'property')) {
+      elements.push(renderText(property, bounds, true))
+    }
 
     for (const unit of units) {
       // Render rectangles
@@ -142,10 +146,13 @@ export function renderSymbolSvg(sexpr: string): string {
         const svg = renderSymbolArc(arc, bounds)
         if (svg) elements.push(svg)
       }
+      for (const text of findChildren(unit, 'text')) {
+        elements.push(renderText(text, bounds, true))
+      }
 
       // Render pins
       for (const pin of findChildren(unit, 'pin')) {
-        const svg = renderSymbolPin(pin, bounds)
+        const svg = renderSymbolPin(pin, bounds, pinNames, pinNumbers)
         if (svg) elements.push(svg)
       }
     }
@@ -171,192 +178,153 @@ export function renderSymbolSvg(sexpr: string): string {
   </g>
 </svg>`
   } catch (error) {
-    return createErrorSvg(`Parse error: ${error}`)
+    return createErrorSvg(`Preview error: ${error}`)
   }
 }
 
 /**
- * Render symbol rectangle
+ * Resolve KiCad symbol fill modes
  */
+function symbolFill(shape: SExpr[]): string {
+  const fill = getFillType(shape)
+  return fill === 'background' ? SYMBOL_COLORS.bodyFill
+    : fill === 'outline' || fill === 'solid' ? SYMBOL_COLORS.body : 'none'
+}
+
 function renderSymbolRectangle(rect: SExpr[], bounds: BoundingBox): string {
   const start = getPoint(rect, 'start')
   const end = getPoint(rect, 'end')
   if (!start || !end) return ''
-
-  const stroke = getStroke(rect)
-  const fillType = getFillType(rect)
-  const fill = fillType === 'background' ? SYMBOL_COLORS.bodyFill : 'none'
-
-  updateBounds(bounds, start.x, start.y)
-  updateBounds(bounds, end.x, end.y)
-
-  const x = Math.min(start.x, end.x)
-  const y = Math.min(start.y, end.y)
-  const w = Math.abs(end.x - start.x)
-  const h = Math.abs(end.y - start.y)
-
-  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${SYMBOL_COLORS.body}" stroke-width="${stroke?.width ?? 0.254}"/>`
+  const width = getStroke(rect)?.width || 0.254
+  updateBounds(bounds, start.x, start.y, width / 2)
+  updateBounds(bounds, end.x, end.y, width / 2)
+  return `<rect x="${Math.min(start.x, end.x)}" y="${Math.min(start.y, end.y)}" width="${Math.abs(end.x - start.x)}" height="${Math.abs(end.y - start.y)}" fill="${symbolFill(rect)}" stroke="${SYMBOL_COLORS.body}" stroke-width="${width}" stroke-linejoin="round"/>`
 }
 
-/**
- * Render symbol polyline
- */
 function renderSymbolPolyline(polyline: SExpr[], bounds: BoundingBox): string {
   const points = getPoints(polyline)
   if (points.length < 2) return ''
-
-  const stroke = getStroke(polyline)
-  const fillType = getFillType(polyline)
-  const fill = fillType === 'background' ? SYMBOL_COLORS.bodyFill : 'none'
-
-  const pointsStr = points.map(p => {
-    updateBounds(bounds, p.x, p.y)
-    return `${p.x},${p.y}`
-  }).join(' ')
-
-  return `<polyline points="${pointsStr}" fill="${fill}" stroke="${SYMBOL_COLORS.body}" stroke-width="${stroke?.width ?? 0.254}" stroke-linecap="round" stroke-linejoin="round"/>`
+  const width = getStroke(polyline)?.width || 0.254
+  for (const point of points) updateBounds(bounds, point.x, point.y, width / 2)
+  return `<polyline points="${points.map(p => `${p.x},${p.y}`).join(' ')}" fill="${symbolFill(polyline)}" stroke="${SYMBOL_COLORS.body}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`
 }
 
-/**
- * Render symbol circle
- */
 function renderSymbolCircle(circle: SExpr[], bounds: BoundingBox): string {
   const center = getPoint(circle, 'center')
   const radius = getNumericAttr(circle, 'radius')
   if (!center || radius === undefined) return ''
-
-  const stroke = getStroke(circle)
-  const fillType = getFillType(circle)
-  const fill = fillType === 'background' ? SYMBOL_COLORS.bodyFill : 'none'
-
-  updateBounds(bounds, center.x - radius, center.y - radius)
-  updateBounds(bounds, center.x + radius, center.y + radius)
-
-  return `<circle cx="${center.x}" cy="${center.y}" r="${radius}" fill="${fill}" stroke="${SYMBOL_COLORS.body}" stroke-width="${stroke?.width ?? 0.254}"/>`
+  const width = getStroke(circle)?.width || 0.254
+  updateBounds(bounds, center.x, center.y, radius + width / 2)
+  return `<circle cx="${center.x}" cy="${center.y}" r="${radius}" fill="${symbolFill(circle)}" stroke="${SYMBOL_COLORS.body}" stroke-width="${width}"/>`
 }
 
-/**
- * Render symbol arc
- */
 function renderSymbolArc(arc: SExpr[], bounds: BoundingBox): string {
   const start = getPoint(arc, 'start')
   const mid = getPoint(arc, 'mid')
   const end = getPoint(arc, 'end')
   if (!start || !mid || !end) return ''
-
-  const stroke = getStroke(arc)
-
-  updateBounds(bounds, start.x, start.y)
-  updateBounds(bounds, mid.x, mid.y)
-  updateBounds(bounds, end.x, end.y)
-
-  // Calculate arc from three points
-  const arcPath = calculateArcPath(start, mid, end)
-
-  return `<path d="${arcPath}" fill="none" stroke="${SYMBOL_COLORS.body}" stroke-width="${stroke?.width ?? 0.254}" stroke-linecap="round"/>`
+  const width = getStroke(arc)?.width || 0.254
+  return `<path d="${calculateArcPath(start, mid, end, bounds, width)}" fill="${symbolFill(arc)}" stroke="${SYMBOL_COLORS.body}" stroke-width="${width}" stroke-linecap="round"/>`
 }
 
-/**
- * Calculate SVG arc path from start, mid, end points
- */
-function calculateArcPath(
-  start: { x: number; y: number },
-  mid: { x: number; y: number },
-  end: { x: number; y: number }
-): string {
-  // Find circle center from three points
-  const ax = start.x, ay = start.y
-  const bx = mid.x, by = mid.y
-  const cx = end.x, cy = end.y
+type Point = { x: number; y: number }
+type Placement = Point & { rotation?: number }
 
-  const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
-  if (Math.abs(d) < 0.0001) {
-    // Points are collinear, draw a line
-    return `M ${start.x} ${start.y} L ${end.x} ${end.y}`
+// Both SVG and KiCad footprint coordinates are Y-down, but positive KiCad
+// rotations are counterclockwise. Symbol geometry is flipped at the root instead.
+function footprintPoint(point: Point, at: Placement): Point {
+  const angle = -(at.rotation ?? 0) * Math.PI / 180
+  return {
+    x: at.x + point.x * Math.cos(angle) - point.y * Math.sin(angle),
+    y: at.y + point.x * Math.sin(angle) + point.y * Math.cos(angle),
   }
-
-  const ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d
-  const uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d
-
-  const radius = Math.sqrt((ax - ux) ** 2 + (ay - uy) ** 2)
-
-  // Determine sweep direction using cross product
-  const cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
-  const sweepFlag = cross > 0 ? 0 : 1
-  const largeArcFlag = 0 // Always use small arc for 3-point arcs
-
-  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${end.x} ${end.y}`
 }
 
-/**
- * Render symbol pin
- */
-function renderSymbolPin(pin: SExpr[], bounds: BoundingBox): string {
-  const at = getPointWithRotation(pin, 'at')
-  const length = getNumericAttr(pin, 'length') ?? 2.54
-  if (!at) return ''
-
-  // Get pin name and number
-  const nameChild = findChild(pin, 'name')
-  const numberChild = findChild(pin, 'number')
-  const pinName = nameChild && nameChild.length >= 2 && isAtom(nameChild[1]) ? nameChild[1] : ''
-  const pinNumber = numberChild && numberChild.length >= 2 && isAtom(numberChild[1]) ? numberChild[1] : ''
-
-  // Calculate pin endpoint based on rotation
-  const rotation = at.rotation ?? 0
-  const radians = (rotation * Math.PI) / 180
-  const endX = at.x + length * Math.cos(radians)
-  const endY = at.y + length * Math.sin(radians)
-
-  updateBounds(bounds, at.x, at.y)
-  updateBounds(bounds, endX, endY)
-
-  const elements: string[] = []
-
-  // Pin line
-  elements.push(`<line x1="${at.x}" y1="${at.y}" x2="${endX}" y2="${endY}" stroke="${SYMBOL_COLORS.pin}" stroke-width="0.254"/>`)
-
-  // Pin dot at connection point
-  elements.push(`<circle cx="${at.x}" cy="${at.y}" r="0.3" fill="${SYMBOL_COLORS.pin}"/>`)
-
-  // Pin name (positioned beyond the pin end)
-  if (pinName && pinName !== '~') {
-    const textOffset = 0.5
-    let textX = endX
-    let textY = endY
-    let anchor = 'start'
-    let baseline = 'middle'
-
-    // Position text based on pin direction
-    if (rotation === 0) {
-      textX = endX + textOffset
-      anchor = 'start'
-    } else if (rotation === 180) {
-      textX = endX - textOffset
-      anchor = 'end'
-    } else if (rotation === 90) {
-      textY = endY + textOffset
-      baseline = 'hanging'
-      anchor = 'middle'
-    } else if (rotation === 270) {
-      textY = endY - textOffset
-      baseline = 'alphabetic'
-      anchor = 'middle'
+function calculateArcPath(start: Point, mid: Point, end: Point, bounds: BoundingBox, width: number): string {
+  const bx = mid.x - start.x, by = mid.y - start.y
+  const cx = end.x - start.x, cy = end.y - start.y
+  const determinant = 2 * (bx * cy - by * cx)
+  for (const point of [start, mid, end]) updateBounds(bounds, point.x, point.y, width / 2)
+  if (Math.abs(determinant) <= Number.EPSILON * Math.max(bx * bx + by * by, cx * cx + cy * cy) * 16) {
+    return `M ${start.x} ${start.y} L ${mid.x} ${mid.y} L ${end.x} ${end.y}`
+  }
+  const b2 = bx * bx + by * by, c2 = cx * cx + cy * cy
+  const ux = (b2 * cy - c2 * by) / determinant
+  const uy = (bx * c2 - cx * b2) / determinant
+  const center = { x: start.x + ux, y: start.y + uy }
+  const radius = Math.hypot(ux, uy)
+  const tau = Math.PI * 2
+  const positive = (angle: number) => ((angle % tau) + tau) % tau
+  const startAngle = Math.atan2(-uy, -ux)
+  const endAngle = Math.atan2(end.y - center.y, end.x - center.x)
+  const sweep = determinant > 0
+  const travel = positive(sweep ? endAngle - startAngle : startAngle - endAngle)
+  for (let angle = 0; angle < tau; angle += Math.PI / 2) {
+    if (positive(sweep ? angle - startAngle : startAngle - angle) <= travel + 1e-12) {
+      updateBounds(bounds, center.x + radius * Math.cos(angle), center.y + radius * Math.sin(angle), width / 2)
     }
-
-    // For rotated text, we need to flip Y back since we're in a flipped coordinate system
-    elements.push(`<text x="${textX}" y="${textY}" fill="${SYMBOL_COLORS.pinText}" font-size="1" font-family="sans-serif" text-anchor="${anchor}" dominant-baseline="${baseline}" transform="scale(1,-1) translate(0,${-2 * textY})">${escapeXml(pinName)}</text>`)
   }
+  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${travel > Math.PI ? 1 : 0} ${sweep ? 1 : 0} ${end.x} ${end.y}`
+}
 
-  // Pin number (positioned between pin start and end)
-  if (pinNumber) {
-    const midX = (at.x + endX) / 2
-    const midY = (at.y + endY) / 2
-    const offsetY = rotation === 0 || rotation === 180 ? 0.8 : 0
+function isHidden(expr: SExpr[] | undefined): boolean {
+  if (!expr) return false
+  const hide = findChild(expr, 'hide')
+  return expr.includes('hide') || !!hide && (hide.length === 1 || hide[1] === 'yes')
+}
 
-    elements.push(`<text x="${midX}" y="${midY + offsetY}" fill="${SYMBOL_COLORS.pinText}" font-size="0.8" font-family="sans-serif" text-anchor="middle" dominant-baseline="middle" transform="scale(1,-1) translate(0,${-2 * (midY + offsetY)})">${escapeXml(pinNumber)}</text>`)
+function renderSymbolPin(pin: SExpr[], bounds: BoundingBox, pinNames?: SExpr[], pinNumbers?: SExpr[]): string {
+  if (isHidden(pin)) return ''
+  const at = getPointWithRotation(pin, 'at')
+  if (!at) return ''
+  const length = getNumericAttr(pin, 'length') ?? 2.54
+  const rotation = ((at.rotation ?? 0) % 360 + 360) % 360
+  const angle = rotation * Math.PI / 180
+  const direction = { x: Math.cos(angle), y: Math.sin(angle) }
+  const end = { x: at.x + length * direction.x, y: at.y + length * direction.y }
+  const style = isAtom(pin[2]) ? pin[2] : 'line'
+  if (!['line', 'inverted', 'clock', 'inverted_clock'].includes(style)) {
+    throw new Error(`Unsupported pin style: ${style}`)
   }
-
+  const inverted = style === 'inverted' || style === 'inverted_clock'
+  const clock = style === 'clock' || style === 'inverted_clock'
+  const radius = 0.3
+  const lineEnd = inverted ? { x: end.x - 2 * radius * direction.x, y: end.y - 2 * radius * direction.y } : end
+  updateBounds(bounds, at.x, at.y, 0.127)
+  updateBounds(bounds, end.x, end.y, 0.127)
+  const elements = [`<line x1="${at.x}" y1="${at.y}" x2="${lineEnd.x}" y2="${lineEnd.y}" stroke="${SYMBOL_COLORS.pin}" stroke-width="0.254"/>`]
+  if (inverted) {
+    const center = { x: end.x - radius * direction.x, y: end.y - radius * direction.y }
+    updateBounds(bounds, center.x, center.y, radius + 0.127)
+    elements.push(`<circle cx="${center.x}" cy="${center.y}" r="${radius}" fill="none" stroke="${SYMBOL_COLORS.pin}" stroke-width="0.254"/>`)
+  }
+  if (clock) {
+    const points = [
+      { x: end.x - direction.y * 0.6, y: end.y + direction.x * 0.6 },
+      { x: end.x + direction.x * 0.6, y: end.y + direction.y * 0.6 },
+      { x: end.x + direction.y * 0.6, y: end.y - direction.x * 0.6 },
+    ]
+    for (const point of points) updateBounds(bounds, point.x, point.y, 0.127)
+    elements.push(`<polyline points="${points.map(p => `${p.x},${p.y}`).join(' ')}" fill="none" stroke="${SYMBOL_COLORS.pin}" stroke-width="0.254" stroke-linejoin="round"/>`)
+  }
+  const name = findChild(pin, 'name')
+  const number = findChild(pin, 'number')
+  const offset = pinNames ? getNumericAttr(pinNames, 'offset') ?? 0.508 : 0.508
+  // Zero name offset puts the name outside the body, above the pin line.
+  const nameAt = offset === 0
+    ? { x: (at.x + end.x) / 2 - direction.y * 0.8, y: (at.y + end.y) / 2 + direction.x * 0.8 }
+    : { x: end.x + direction.x * offset, y: end.y + direction.y * offset }
+  const labelAngle = rotation === 90 || rotation === 270 ? 90 : 0
+  if (name && name[1] !== '~' && !isHidden(pinNames)) {
+    const justify = offset === 0 ? [] : [['justify', rotation === 180 || rotation === 270 ? 'right' : 'left']]
+    const effects = findChild(name, 'effects') ?? ['effects', ['font', ['size', '1.27', '1.27']]]
+    elements.push(renderText(['text', name[1], ['at', `${nameAt.x}`, `${nameAt.y}`, `${labelAngle}`], [...effects, ...justify]], bounds, true, SYMBOL_COLORS.pinText))
+  }
+  if (number && !isHidden(pinNumbers)) {
+    const side = offset === 0 ? -1 : 1
+    const numberAt = { x: (at.x + end.x) / 2 - direction.y * 0.8 * side, y: (at.y + end.y) / 2 + direction.x * 0.8 * side }
+    elements.push(renderText(['text', number[1], ['at', `${numberAt.x}`, `${numberAt.y}`, `${labelAngle}`], findChild(number, 'effects') ?? ['effects', ['font', ['size', '1.27', '1.27']]]], bounds, true, SYMBOL_COLORS.pinText))
+  }
   return elements.join('\n')
 }
 
@@ -383,62 +351,20 @@ export function renderFootprintSvg(sexpr: string): string {
       if (svg) elements.push(svg)
     }
 
-    // Render lines
-    for (const line of findChildren(parsed, 'fp_line')) {
-      const svg = renderFootprintLine(line, bounds)
-      if (svg) elements.push(svg)
+    const properties = new Map<string, string>()
+    for (const property of findChildren(parsed, 'property')) {
+      if (isAtom(property[1]) && isAtom(property[2])) properties.set(property[1].toUpperCase(), property[2])
     }
-
-    // Render circles
-    for (const circle of findChildren(parsed, 'fp_circle')) {
-      const svg = renderFootprintCircle(circle, bounds)
-      if (svg) elements.push(svg)
-    }
-
-    // Render arcs
-    for (const arc of findChildren(parsed, 'fp_arc')) {
-      const svg = renderFootprintArc(arc, bounds)
-      if (svg) elements.push(svg)
-    }
-
-    // Render rectangles
-    for (const rect of findChildren(parsed, 'fp_rect')) {
-      const svg = renderFootprintRect(rect, bounds)
-      if (svg) elements.push(svg)
-    }
-
-    // Render polygons (SOLIDREGION)
-    for (const poly of findChildren(parsed, 'fp_poly')) {
-      const svg = renderFootprintPoly(poly, bounds)
-      if (svg) elements.push(svg)
-    }
-
-    // Render gr_* elements (graphics primitives that may appear in footprints)
-    for (const line of findChildren(parsed, 'gr_line')) {
-      const svg = renderFootprintLine(line, bounds)
-      if (svg) elements.push(svg)
-    }
-    for (const circle of findChildren(parsed, 'gr_circle')) {
-      const svg = renderFootprintCircle(circle, bounds)
-      if (svg) elements.push(svg)
-    }
-    for (const arc of findChildren(parsed, 'gr_arc')) {
-      const svg = renderFootprintArc(arc, bounds)
-      if (svg) elements.push(svg)
-    }
-    for (const rect of findChildren(parsed, 'gr_rect')) {
-      const svg = renderFootprintRect(rect, bounds)
-      if (svg) elements.push(svg)
-    }
-    for (const poly of findChildren(parsed, 'gr_poly')) {
-      const svg = renderFootprintPoly(poly, bounds)
-      if (svg) elements.push(svg)
-    }
-
-    // Render text (silkscreen only)
-    for (const text of findChildren(parsed, 'fp_text')) {
-      const svg = renderFootprintText(text, bounds)
-      if (svg) elements.push(svg)
+    for (const child of parsed) {
+      if (!isList(child)) continue
+      const tag = getTag(child) ?? ''
+      if (tag === 'fp_text' || tag === 'property') {
+        elements.push(renderText(child, bounds, false, undefined, properties))
+      } else if (tag.startsWith('fp_') || tag.startsWith('gr_')) {
+        elements.push(renderFootprintGraphic(child, bounds))
+      } else if (tag === 'zone') {
+        elements.push(renderRuleArea(child, bounds))
+      }
     }
 
     // Add padding to bounds
@@ -461,7 +387,7 @@ export function renderFootprintSvg(sexpr: string): string {
   </g>
 </svg>`
   } catch (error) {
-    return createErrorSvg(`Parse error: ${error}`)
+    return createErrorSvg(`Preview error: ${error}`)
   }
 }
 
@@ -500,316 +426,183 @@ function getLayerColor(layer: string): string {
  * Render footprint pad
  */
 function renderFootprintPad(pad: SExpr[], bounds: BoundingBox): string {
-  // (pad "number" type shape (at x y [rot]) (size w h) (layers ...) ...)
-  if (!isList(pad) || pad.length < 4) return ''
-
   const padNumber = isAtom(pad[1]) ? pad[1] : ''
-  const padType = isAtom(pad[2]) ? pad[2] : '' // smd, thru_hole, np_thru_hole
-  const padShape = isAtom(pad[3]) ? pad[3] : '' // rect, roundrect, circle, oval, custom
-
+  const padType = isAtom(pad[2]) ? pad[2] : ''
+  const padShape = isAtom(pad[3]) ? pad[3] : ''
   const at = getPointWithRotation(pad, 'at')
   const size = getSize(pad)
-  if (!at || !size) return ''
-
-  updateBounds(bounds, at.x - size.width / 2, at.y - size.height / 2)
-  updateBounds(bounds, at.x + size.width / 2, at.y + size.height / 2)
-
-  const elements: string[] = []
+  if (!at || !size) throw new Error(`Invalid pad geometry: ${padNumber}`)
+  if (!['rect', 'roundrect', 'circle', 'oval', 'custom'].includes(padShape)
+    || findChild(pad, 'chamfer') || findChild(pad, 'rect_delta')) {
+    throw new Error(`Unsupported pad geometry: ${padShape}`)
+  }
   const layers = getLayers(pad)
-
-  // Use KiCad-style pad colors: yellow for THT, red/green for SMD
-  let color: string
-  if (padType === 'thru_hole' || padType === 'np_thru_hole') {
-    color = FOOTPRINT_COLORS.padThruHole // Yellow for through-hole
-  } else if (layers.some(l => l.includes('B.'))) {
-    color = FOOTPRINT_COLORS.padBack // Green for back SMD
+  const color = padType === 'thru_hole' || padType === 'np_thru_hole' ? FOOTPRINT_COLORS.padThruHole
+    : layers.includes('B.Cu') && !layers.includes('F.Cu') ? FOOTPRINT_COLORS.padBack : FOOTPRINT_COLORS.padFront
+  const drill = findChild(pad, 'drill')
+  // The pad position is the drill centre; the drill offset translates copper,
+  // including custom primitives and the anchor, before rotating the pad.
+  const offset = drill ? getPoint(drill, 'offset') ?? { x: 0, y: 0 } : { x: 0, y: 0 }
+  const copperAt = { ...footprintPoint(offset, at), rotation: at.rotation }
+  const copperBounds: BoundingBox = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
+  const elements: string[] = []
+  const anchor = padShape === 'custom' ? getAttr(findChild(pad, 'options') ?? [], 'anchor') ?? 'rect' : padShape
+  if (!['rect', 'roundrect', 'circle', 'oval'].includes(anchor)) throw new Error(`Unsupported custom anchor: ${anchor}`)
+  const radius = anchor === 'oval' ? Math.min(size.width, size.height) / 2
+    : anchor === 'roundrect' ? Math.min(size.width, size.height) * (getNumericAttr(pad, 'roundrect_rratio') ?? 0.25) : 0
+  if (anchor === 'circle') {
+    const r = size.width / 2
+    updateBounds(copperBounds, copperAt.x, copperAt.y, r)
+    elements.push(`<circle cx="${copperAt.x}" cy="${copperAt.y}" r="${r}" fill="${color}"/>`)
   } else {
-    color = FOOTPRINT_COLORS.padFront // Red for front SMD
+    elements.push(renderRoundedRect(size.width, size.height, radius, copperAt, color, copperBounds))
   }
-
-  // Render pad shape
-  const rotation = at.rotation ?? 0
-  const transform = rotation !== 0 ? ` transform="rotate(${rotation}, ${at.x}, ${at.y})"` : ''
-
-  if (padShape === 'circle') {
-    const r = Math.min(size.width, size.height) / 2
-    elements.push(`<circle cx="${at.x}" cy="${at.y}" r="${r}" fill="${color}"${transform}/>`)
-  } else if (padShape === 'oval') {
-    const rx = size.width / 2
-    const ry = size.height / 2
-    elements.push(`<ellipse cx="${at.x}" cy="${at.y}" rx="${rx}" ry="${ry}" fill="${color}"${transform}/>`)
-  } else if (padShape === 'roundrect') {
-    const rratio = getNumericAttr(pad, 'roundrect_rratio') ?? 0.25
-    const rx = Math.min(size.width, size.height) * rratio / 2
-    const x = at.x - size.width / 2
-    const y = at.y - size.height / 2
-    elements.push(`<rect x="${x}" y="${y}" width="${size.width}" height="${size.height}" rx="${rx}" fill="${color}"${transform}/>`)
-  } else if (padShape === 'custom') {
-    // Render custom pad primitives
+  if (padShape === 'custom') {
     const primitives = findChild(pad, 'primitives')
-    if (primitives) {
-      for (const prim of findChildren(primitives, 'gr_poly')) {
-        const points = getPoints(prim)
-        if (points.length >= 3) {
-          // Translate points relative to pad center and update bounds
-          const polyStr = points.map(p => {
-            const absX = at.x + p.x
-            const absY = at.y + p.y
-            updateBounds(bounds, absX, absY)
-            return `${absX},${absY}`
-          }).join(' ')
-          elements.push(`<polygon points="${polyStr}" fill="${color}"${transform}/>`)
-        }
-      }
-    }
-    // Fallback to rect if no primitives
-    if (elements.length === 0) {
-      const x = at.x - size.width / 2
-      const y = at.y - size.height / 2
-      elements.push(`<rect x="${x}" y="${y}" width="${size.width}" height="${size.height}" fill="${color}"${transform}/>`)
-    }
-  } else {
-    // Default to rect
-    const x = at.x - size.width / 2
-    const y = at.y - size.height / 2
-    elements.push(`<rect x="${x}" y="${y}" width="${size.width}" height="${size.height}" fill="${color}"${transform}/>`)
-  }
-
-  // Render drill hole for THT pads
-  if (padType === 'thru_hole' || padType === 'np_thru_hole') {
-    const drill = findChild(pad, 'drill')
-    if (drill && drill.length >= 2) {
-      // (drill size) or (drill oval w h)
-      const isOval = isAtom(drill[1]) && drill[1] === 'oval'
-      if (isOval && drill.length >= 4) {
-        const dw = parseFloat(isAtom(drill[2]) ? drill[2] : '0')
-        const dh = parseFloat(isAtom(drill[3]) ? drill[3] : '0')
-        elements.push(`<ellipse cx="${at.x}" cy="${at.y}" rx="${dw / 2}" ry="${dh / 2}" fill="${FOOTPRINT_COLORS.drill}"${transform}/>`)
-      } else {
-        const drillSize = parseFloat(isAtom(drill[1]) ? drill[1] : '0')
-        elements.push(`<circle cx="${at.x}" cy="${at.y}" r="${drillSize / 2}" fill="${FOOTPRINT_COLORS.drill}"/>`)
-      }
+    for (const primitive of primitives ?? []) {
+      if (isList(primitive)) elements.push(renderFootprintGraphic(primitive, copperBounds, copperAt, color))
     }
   }
-
-  // Render pad number
+  updateBounds(bounds, copperBounds.minX, copperBounds.minY)
+  updateBounds(bounds, copperBounds.maxX, copperBounds.maxY)
+  if (drill) {
+    const oval = drill[1] === 'oval'
+    const width = Number(oval ? drill[2] : drill[1])
+    const height = Number(oval ? drill[3] : drill[1])
+    if (!(width > 0 && height > 0)) throw new Error(`Invalid drill geometry: ${padNumber}`)
+    elements.push(renderRoundedRect(width, height, Math.min(width, height) / 2, at, FOOTPRINT_COLORS.drill, bounds))
+  }
   if (padNumber) {
-    const fontSize = Math.min(size.width, size.height) * 0.5
-    elements.push(`<text x="${at.x}" y="${at.y}" fill="#FFFFFF" font-size="${fontSize}" font-family="sans-serif" text-anchor="middle" dominant-baseline="central">${escapeXml(padNumber)}</text>`)
+    const fontSize = (padShape === 'custom'
+      ? Math.min(copperBounds.maxX - copperBounds.minX, copperBounds.maxY - copperBounds.minY)
+      : Math.min(size.width, size.height)) * 0.5
+    const textWidth = padNumber.length * fontSize * 0.7
+    updateBounds(bounds, copperAt.x - textWidth / 2, copperAt.y - fontSize * 0.75)
+    updateBounds(bounds, copperAt.x + textWidth / 2, copperAt.y + fontSize * 0.75)
+    elements.push(`<text x="${copperAt.x}" y="${copperAt.y}" fill="#FFFFFF" font-size="${fontSize}" textLength="${textWidth}" lengthAdjust="spacingAndGlyphs" font-family="sans-serif" text-anchor="middle" dominant-baseline="central">${escapeXml(padNumber)}</text>`)
   }
-
-  return elements.join('\n')
+  return `<g data-pad="${escapeXml(padNumber)}">${elements.join('\n')}</g>`
 }
 
-/**
- * Render footprint line
- */
-function renderFootprintLine(line: SExpr[], bounds: BoundingBox): string {
-  const start = getPoint(line, 'start')
-  const end = getPoint(line, 'end')
-  if (!start || !end) return ''
-
-  const stroke = getStroke(line)
-  const layers = getLayers(line)
-  const layer = layers[0] ?? 'F.SilkS'
-
-  // Skip courtyard for cleaner preview
-  if (layer.includes('CrtYd')) return ''
-
-  const color = getLayerColor(layer)
-
-  updateBounds(bounds, start.x, start.y)
-  updateBounds(bounds, end.x, end.y)
-
-  return `<line x1="${start.x}" y1="${start.y}" x2="${end.x}" y2="${end.y}" stroke="${color}" stroke-width="${stroke?.width ?? 0.15}" stroke-linecap="round"/>`
+function renderRoundedRect(width: number, height: number, radius: number, at: Placement, color: string, bounds: BoundingBox): string {
+  const r = Math.min(Math.max(radius, 0), Math.min(width, height) / 2)
+  const angle = (at.rotation ?? 0) * Math.PI / 180
+  const cos = Math.abs(Math.cos(angle)), sin = Math.abs(Math.sin(angle))
+  // A rounded rectangle is the Minkowski sum of an inner rectangle and a disk.
+  const dx = cos * (width / 2 - r) + sin * (height / 2 - r) + r
+  const dy = sin * (width / 2 - r) + cos * (height / 2 - r) + r
+  updateBounds(bounds, at.x - dx, at.y - dy)
+  updateBounds(bounds, at.x + dx, at.y + dy)
+  return `<rect x="${-width / 2}" y="${-height / 2}" width="${width}" height="${height}" rx="${r}" fill="${color}" transform="translate(${at.x} ${at.y}) rotate(${-(at.rotation ?? 0)})"/>`
 }
 
-/**
- * Render footprint circle
- */
-function renderFootprintCircle(circle: SExpr[], bounds: BoundingBox): string {
-  const center = getPoint(circle, 'center')
-  const end = getPoint(circle, 'end')
-  if (!center || !end) return ''
-
-  // KiCad defines circles by center and a point on the circumference
-  const radius = Math.sqrt((end.x - center.x) ** 2 + (end.y - center.y) ** 2)
-
-  const stroke = getStroke(circle)
-  const layers = getLayers(circle)
-  const layer = layers[0] ?? 'F.SilkS'
-
-  // Skip courtyard
-  if (layer.includes('CrtYd')) return ''
-
-  const color = getLayerColor(layer)
-
-  updateBounds(bounds, center.x - radius, center.y - radius)
-  updateBounds(bounds, center.x + radius, center.y + radius)
-
-  return `<circle cx="${center.x}" cy="${center.y}" r="${radius}" fill="none" stroke="${color}" stroke-width="${stroke?.width ?? 0.15}"/>`
-}
-
-/**
- * Render footprint arc
- */
-function renderFootprintArc(arc: SExpr[], bounds: BoundingBox): string {
-  const start = getPoint(arc, 'start')
-  const mid = getPoint(arc, 'mid')
-  const end = getPoint(arc, 'end')
-  if (!start || !mid || !end) return ''
-
-  const stroke = getStroke(arc)
-  const layers = getLayers(arc)
-  const layer = layers[0] ?? 'F.SilkS'
-
-  // Skip courtyard
-  if (layer.includes('CrtYd')) return ''
-
-  const color = getLayerColor(layer)
-
-  updateBounds(bounds, start.x, start.y)
-  updateBounds(bounds, mid.x, mid.y)
-  updateBounds(bounds, end.x, end.y)
-
-  const arcPath = calculateArcPath(start, mid, end)
-
-  return `<path d="${arcPath}" fill="none" stroke="${color}" stroke-width="${stroke?.width ?? 0.15}" stroke-linecap="round"/>`
-}
-
-/**
- * Render footprint polygon (for SOLIDREGION)
- */
-function renderFootprintPoly(poly: SExpr[], bounds: BoundingBox): string {
-  // (fp_poly (pts (xy x y) (xy x y) ...) (layer "...") (stroke ...) (fill ...))
-  const points = getPoints(poly)
-  if (points.length < 3) return ''
-
-  const layers = getLayers(poly)
-  const layer = layers[0] ?? 'F.Cu'
-
-  // Skip courtyard for cleaner preview
-  if (layer.includes('CrtYd')) return ''
-
-  const color = getLayerColor(layer)
-  const stroke = getStroke(poly)
-  const fillType = getFillType(poly)
+// Shared by footprint drawings and custom-pad copper; primitive widths in pads
+// use (width), whereas footprint drawings use (stroke (width ...)).
+function renderFootprintGraphic(shape: SExpr[], bounds: BoundingBox, at: Placement = { x: 0, y: 0 }, copperColor?: string): string {
+  const tag = getTag(shape) ?? ''
+  const kind = tag.replace(/^(fp|gr)_/, '')
+  const color = copperColor ?? getLayerColor(getLayers(shape)[0] ?? 'F.SilkS')
+  const width = getStroke(shape)?.width ?? getNumericAttr(shape, 'width') ?? (copperColor ? 0 : 0.15)
+  const fillType = getFillType(shape)
   const fill = fillType === 'solid' || fillType === 'yes' ? color : 'none'
-
-  const pointsStr = points.map(p => {
-    updateBounds(bounds, p.x, p.y)
-    return `${p.x},${p.y}`
-  }).join(' ')
-
-  const strokeWidth = stroke?.width ?? 0
-  const strokeAttr = strokeWidth > 0 ? ` stroke="${color}" stroke-width="${strokeWidth}"` : ''
-
-  return `<polygon points="${pointsStr}" fill="${fill}"${strokeAttr}/>`
+  const stroke = `stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"`
+  if (kind === 'line' || kind === 'arc' || kind === 'rect') {
+    const localStart = getPoint(shape, 'start'), localEnd = getPoint(shape, 'end')
+    if (!localStart || !localEnd) throw new Error(`Invalid ${tag} geometry`)
+    const start = footprintPoint(localStart, at), end = footprintPoint(localEnd, at)
+    if (kind === 'arc') {
+      const mid = getPoint(shape, 'mid')
+      if (!mid) throw new Error(`Unsupported ${tag} without midpoint`)
+      return `<path d="${calculateArcPath(start, footprintPoint(mid, at), end, bounds, width)}" fill="none" ${stroke}/>`
+    }
+    if (kind === 'rect') {
+      const points = [localStart, { x: localEnd.x, y: localStart.y }, localEnd, { x: localStart.x, y: localEnd.y }].map(p => footprintPoint(p, at))
+      for (const point of points) updateBounds(bounds, point.x, point.y, width / 2)
+      return `<polygon points="${points.map(p => `${p.x},${p.y}`).join(' ')}" fill="${fill}" ${stroke}/>`
+    }
+    updateBounds(bounds, start.x, start.y, width / 2)
+    updateBounds(bounds, end.x, end.y, width / 2)
+    return `<line x1="${start.x}" y1="${start.y}" x2="${end.x}" y2="${end.y}" ${stroke}/>`
+  }
+  if (kind === 'circle') {
+    const center = getPoint(shape, 'center'), end = getPoint(shape, 'end')
+    if (!center || !end) throw new Error(`Invalid ${tag} geometry`)
+    const radius = Math.hypot(end.x - center.x, end.y - center.y)
+    const world = footprintPoint(center, at)
+    updateBounds(bounds, world.x, world.y, radius + width / 2)
+    return `<circle cx="${world.x}" cy="${world.y}" r="${radius}" fill="${fill}" ${stroke}/>`
+  }
+  if (kind === 'poly') {
+    const points = getPoints(shape).map(p => footprintPoint(p, at))
+    if (points.length < 3) throw new Error(`Invalid ${tag} geometry`)
+    for (const point of points) updateBounds(bounds, point.x, point.y, width / 2)
+    return `<polygon points="${points.map(p => `${p.x},${p.y}`).join(' ')}" fill="${fill}" ${stroke}/>`
+  }
+  throw new Error(`Unsupported footprint geometry: ${tag}`)
 }
 
-/**
- * Render footprint rectangle
- */
-function renderFootprintRect(rect: SExpr[], bounds: BoundingBox): string {
-  const start = getPoint(rect, 'start')
-  const end = getPoint(rect, 'end')
-  if (!start || !end) return ''
-
-  const layers = getLayers(rect)
-  const layer = layers[0] ?? 'F.SilkS'
-
-  // Skip courtyard for cleaner preview
-  if (layer.includes('CrtYd')) return ''
-
-  const color = getLayerColor(layer)
-  const stroke = getStroke(rect)
-  const fillType = getFillType(rect)
-  const fill = fillType === 'solid' ? color : 'none'
-
-  updateBounds(bounds, start.x, start.y)
-  updateBounds(bounds, end.x, end.y)
-
-  const x = Math.min(start.x, end.x)
-  const y = Math.min(start.y, end.y)
-  const w = Math.abs(end.x - start.x)
-  const h = Math.abs(end.y - start.y)
-
-  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${color}" stroke-width="${stroke?.width ?? 0.15}"/>`
+function renderRuleArea(zone: SExpr[], bounds: BoundingBox): string {
+  const keepout = findChild(zone, 'keepout')
+  if (!keepout) throw new Error('Unsupported footprint copper zone (not a rule area)')
+  const restrictions = keepout.filter(isList).filter(rule => rule[1] === 'not_allowed').map(rule => getTag(rule))
+  const polygons = findChildren(zone, 'polygon')
+  if (polygons.length === 0) throw new Error('Invalid rule area: missing polygon')
+  const color = FOOTPRINT_COLORS.margin
+  const elements: string[] = []
+  for (const polygon of polygons) {
+    const points = getPoints(polygon)
+    if (points.length < 3) throw new Error('Invalid rule-area polygon')
+    for (const point of points) updateBounds(bounds, point.x, point.y, 0.075)
+    elements.push(`<polygon points="${points.map(p => `${p.x},${p.y}`).join(' ')}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="0.15" stroke-dasharray="0.4 0.2"/>`)
+  }
+  return `<g data-rule-area="true"><title>${escapeXml(`Rule area (${getLayers(zone).join(', ')}): ${restrictions.join(', ')} prohibited; outline only, not a copper subtraction`)}</title>${elements.join('')}</g>`
 }
 
-/**
- * Render footprint text
- */
-function renderFootprintText(text: SExpr[], bounds: BoundingBox): string {
-  // (fp_text type "text" (at x y [rot]) (layer "...") (effects ...))
-  if (!isList(text) || text.length < 3) return ''
-
-  const textType = isAtom(text[1]) ? text[1] : '' // reference, value, user
-  const textContent = isAtom(text[2]) ? text[2] : ''
-
-  // Skip reference and value - they're placeholders
-  if (textType === 'reference' || textType === 'value') return ''
-
-  const at = getPointWithRotation(text, 'at')
-  if (!at) return ''
-
-  const layers = getLayers(text)
-  const layer = layers[0] ?? 'F.SilkS'
-  const color = getLayerColor(layer)
-
-  // Parse font size and justification from effects
+function renderText(text: SExpr[], bounds: BoundingBox, symbol: boolean, color?: string, properties?: Map<string, string>): string {
   const effects = findChild(text, 'effects')
-  let fontSize = 1
-  let textAnchor = 'middle' // default: centered
-
-  if (effects) {
-    // Get font size
-    const font = findChild(effects, 'font')
-    if (font) {
-      const size = getSize(font)
-      if (size) fontSize = size.height
+  if (isHidden(text) || isHidden(effects)) return ''
+  const at = getPointWithRotation(text, 'at')
+  const contentNode = text[getTag(text) === 'text' ? 1 : 2]
+  if (!at || !isAtom(contentNode) || !contentNode) return ''
+  const content = contentNode.replace(/\$\{([^}]+)\}/g, (match, key: string) => properties?.get(key.toUpperCase()) ?? match)
+  const font = effects ? findChild(effects, 'font') : undefined
+  const size = font ? getSize(font) : undefined
+  const height = size?.height ?? 1.27
+  const charWidth = (size?.width ?? height) * 0.7
+  const justify = effects ? findChild(effects, 'justify') : undefined
+  const anchor = justify?.includes('left') ? 'start' : justify?.includes('right') ? 'end' : 'middle'
+  const mirrored = justify?.includes('mirror') ? -1 : 1
+  const lines = content.split('\n')
+  const lineHeight = height * 1.5
+  const totalHeight = height + (lines.length - 1) * lineHeight
+  const top = justify?.includes('top') ? 0 : justify?.includes('bottom') ? -totalHeight : -totalHeight / 2
+  const rotation = symbol ? at.rotation ?? 0 : -(at.rotation ?? 0)
+  const angle = rotation * Math.PI / 180
+  const spans: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const width = lines[i].length * charWidth
+    const left = anchor === 'start' ? 0 : anchor === 'end' ? -width : -width / 2
+    const y = top + height / 2 + i * lineHeight
+    // Include glyph ascenders/descenders and rotate the actual label envelope.
+    for (const x of [left, left + width]) for (const edgeY of [y - height * 0.75, y + height * 0.75]) {
+      const localX = x * mirrored, localY = edgeY * (symbol ? -1 : 1)
+      updateBounds(bounds, at.x + localX * Math.cos(angle) - localY * Math.sin(angle), at.y + localX * Math.sin(angle) + localY * Math.cos(angle))
     }
-
-    // Get justification: (justify left/right/center)
-    const justify = findChild(effects, 'justify')
-    if (justify) {
-      for (let i = 1; i < justify.length; i++) {
-        const val = isAtom(justify[i]) ? justify[i] : ''
-        if (val === 'left') textAnchor = 'start'
-        else if (val === 'right') textAnchor = 'end'
-      }
-    }
+    spans.push(`<tspan x="0" y="${y}"${width > 0 ? ` textLength="${width}" lengthAdjust="spacingAndGlyphs"` : ''}>${escapeXml(lines[i])}</tspan>`)
   }
-
-  // Estimate text bounds based on content and justification
-  const textWidth = textContent.length * fontSize * 0.6
-  const textHeight = fontSize
-
-  if (textAnchor === 'start') {
-    updateBounds(bounds, at.x, at.y - textHeight / 2)
-    updateBounds(bounds, at.x + textWidth, at.y + textHeight / 2)
-  } else if (textAnchor === 'end') {
-    updateBounds(bounds, at.x - textWidth, at.y - textHeight / 2)
-    updateBounds(bounds, at.x, at.y + textHeight / 2)
-  } else {
-    updateBounds(bounds, at.x - textWidth / 2, at.y - textHeight / 2)
-    updateBounds(bounds, at.x + textWidth / 2, at.y + textHeight / 2)
-  }
-
-  const rotation = at.rotation ?? 0
-  const transform = rotation !== 0 ? ` transform="rotate(${rotation}, ${at.x}, ${at.y})"` : ''
-
-  return `<text x="${at.x}" y="${at.y}" dy="0.35em" fill="${color}" font-size="${fontSize}" font-family="sans-serif" text-anchor="${textAnchor}"${transform}>${escapeXml(textContent)}</text>`
+  const fill = color ?? (symbol ? SYMBOL_COLORS.text : getLayerColor(getLayers(text)[0] ?? 'F.SilkS'))
+  const style = `${font?.includes('bold') || getAttr(font ?? [], 'bold') === 'yes' ? ' font-weight="bold"' : ''}${font?.includes('italic') || getAttr(font ?? [], 'italic') === 'yes' ? ' font-style="italic"' : ''}`
+  return `<text fill="${fill}" font-size="${height}" font-family="sans-serif" text-anchor="${anchor}" dominant-baseline="central"${style} transform="translate(${at.x} ${at.y}) rotate(${rotation}) scale(${mirrored} ${symbol ? -1 : 1})">${spans.join('')}</text>`
 }
 
 /**
  * Update bounding box with a point
  */
-function updateBounds(bounds: BoundingBox, x: number, y: number): void {
-  bounds.minX = Math.min(bounds.minX, x)
-  bounds.maxX = Math.max(bounds.maxX, x)
-  bounds.minY = Math.min(bounds.minY, y)
-  bounds.maxY = Math.max(bounds.maxY, y)
+function updateBounds(bounds: BoundingBox, x: number, y: number, radius = 0): void {
+  bounds.minX = Math.min(bounds.minX, x - radius)
+  bounds.maxX = Math.max(bounds.maxX, x + radius)
+  bounds.minY = Math.min(bounds.minY, y - radius)
+  bounds.maxY = Math.max(bounds.maxY, y + radius)
 }
 
 /**

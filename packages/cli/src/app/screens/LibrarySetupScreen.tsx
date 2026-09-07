@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { createLibraryService } from '@jlcpcb/core';
 import { useNavigation, useCurrentScreen } from '../navigation/NavigationContext.js';
@@ -9,13 +9,19 @@ import { Divider } from '../components/Divider.js';
 const libraryService = createLibraryService();
 
 export function LibrarySetupScreen() {
-  const { push, pop } = useNavigation();
+  const { replace, pop } = useNavigation();
   const { params } = useCurrentScreen() as { screen: 'library-setup'; params: LibrarySetupParams };
   const { columns: terminalWidth } = useTerminalSize();
 
   const [selectedOption, setSelectedOption] = useState<'install' | 'cancel'>('install');
   const [isInstalling, setIsInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeRef = useRef(true);
+
+  useEffect(() => {
+    activeRef.current = true;
+    return () => { activeRef.current = false; };
+  }, []);
 
   useInput((input, key) => {
     if (isInstalling) return;
@@ -31,19 +37,20 @@ export function LibrarySetupScreen() {
         libraryService
           .ensureGlobalTables()
           .then(() => {
+            if (!activeRef.current) return;
             // Success - continue to install the component
-            push('install', {
+            replace('install', {
               componentId: params.componentId,
               component: params.component,
+              installOptions: params.installOptions,
             });
           })
           .catch((err) => {
+            if (!activeRef.current) return;
             setError(err instanceof Error ? err.message : 'Unknown error');
             setIsInstalling(false);
           });
       }
-    } else if (key.escape) {
-      pop();
     }
   });
 

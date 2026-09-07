@@ -5,7 +5,7 @@ import open from 'open';
 import { useNavigation, useCurrentScreen } from '../navigation/NavigationContext.js';
 import type { InfoParams, ComponentInfo } from '../navigation/types.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { DetailView, type DetailViewComponent } from '../components/DetailView.js';
+import { DetailView } from '../components/DetailView.js';
 
 const componentService = createComponentService();
 const libraryService = createLibraryService();
@@ -33,16 +33,15 @@ export function InfoScreen() {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        // Fetch library status (for paths)
-        const status = await libraryService.getStatus();
-        setLibraryStatus(status);
+        if (!params.installOptions?.projectPath) {
+          const status = await libraryService.getStatus();
+          setLibraryStatus(status);
+        }
 
         // Check if already installed
-        const installed = await libraryService.listInstalled({});
+        const installed = await libraryService.listInstalled({ projectPath: params.installOptions?.projectPath });
         const found = installed.find(c => c.lcscId === componentId);
-        if (found) {
-          setInstalledInfo(found);
-        }
+        setInstalledInfo(found ?? null);
 
         // Fetch full details from API (always, to get price/stock/attributes)
         const searchResults = await componentService.search(componentId, { limit: 1 });
@@ -67,7 +66,7 @@ export function InfoScreen() {
     };
 
     fetchData();
-  }, [params.componentId, params.component]);
+  }, [params.componentId, params.component, params.installOptions?.projectPath]);
 
   // Get datasheet URL (different field names in different types)
   const datasheetUrl = component && ('datasheetPdf' in component ? component.datasheetPdf : 'datasheet' in component ? component.datasheet : undefined);
@@ -87,7 +86,7 @@ export function InfoScreen() {
       setIsRegenerating(true);
       setRegenerateMessage('Regenerating symbol and footprint...');
 
-      libraryService.install(componentLcscId, { force: true })
+      libraryService.install(componentLcscId, { ...params.installOptions, force: true })
         .then((result) => {
           setRegenerateMessage(`✓ Regenerated: ${result.symbolAction}`);
           // Clear message after 2 seconds
@@ -106,7 +105,7 @@ export function InfoScreen() {
       setIsDeleting(true);
       setRegenerateMessage('Deleting component...');
 
-      libraryService.remove(installedInfo.lcscId)
+      libraryService.remove(installedInfo.lcscId, { projectPath: params.installOptions?.projectPath })
         .then(() => {
           setRegenerateMessage('✓ Component deleted');
           setInstalledInfo(null);
@@ -126,8 +125,8 @@ export function InfoScreen() {
       return;
     }
 
-    // Enter - Install (only when not installed)
-    if (key.return && !installedInfo) {
+    // Explicit install commands may update an already-installed component.
+    if (key.return && (!installedInfo || params.installOptions)) {
       if (!componentLcscId) {
         setRegenerateMessage('✗ Missing LCSC part number');
         setTimeout(() => setRegenerateMessage(null), 3000);
@@ -138,11 +137,12 @@ export function InfoScreen() {
       checkingRef.current = true;
       setIsCheckingLibrary(true);
 
-      if (libraryStatus && (!libraryStatus.installed || !libraryStatus.linked)) {
+      if (!params.installOptions?.projectPath && libraryStatus && (!libraryStatus.installed || !libraryStatus.linked)) {
         // Libraries not set up - show setup screen
         push('library-setup', {
           componentId: componentLcscId,
           component,
+          installOptions: params.installOptions,
         });
         setIsCheckingLibrary(false);
         checkingRef.current = false;
@@ -151,6 +151,7 @@ export function InfoScreen() {
         push('install', {
           componentId: componentLcscId,
           component,
+          installOptions: params.installOptions,
         });
         setIsCheckingLibrary(false);
         checkingRef.current = false;
@@ -206,6 +207,7 @@ export function InfoScreen() {
         component={{ ...component, lcscId: componentLcscId }}
         terminalWidth={terminalWidth}
         isInstalled={!!installedInfo}
+        canInstall={!installedInfo || !!params.installOptions}
         installedInfo={installedInfo}
         statusMessage={regenerateMessage}
       />

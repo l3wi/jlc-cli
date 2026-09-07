@@ -10,18 +10,15 @@ import type {
   EasyEDASymbolRect,
   EasyEDASymbolCircle,
   EasyEDASymbolEllipse,
-  EasyEDASymbolArc,
-  EasyEDASymbolPolyline,
-  EasyEDASymbolPolygon,
   EasyEDASymbolPath,
   EasyEDASymbolText,
 } from '../types/index.js';
 import { KICAD_SYMBOL_VERSION, KICAD_DEFAULTS } from '../constants/index.js';
-import { roundTo } from '../utils/index.js';
+import { roundTo, childExpressions } from '../utils/index.js';
 import { extractDisplayValue } from './value-normalizer.js';
 import { getSymbolTemplate, type SymbolTemplate } from './symbol-templates.js';
 import { getLibraryCategory, type LibraryCategory } from './category-router.js';
-import { parseSvgArcPath, svgArcToCenter, radToDeg, normalizeAngle } from './svg-arc.js';
+import { flattenSvgPath, type SvgSubpath } from './svg-path.js';
 
 // Map library categories to template prefixes for passive components
 const CATEGORY_TO_PREFIX: Partial<Record<LibraryCategory, string>> = {
@@ -33,6 +30,40 @@ const CATEGORY_TO_PREFIX: Partial<Record<LibraryCategory, string>> = {
 
 // EasyEDA uses 10mil units (0.254mm per unit)
 const EE_TO_MM = 0.254;
+// Leave room for the final 0.001 mm coordinate rounding inside the error bound.
+const CURVE_TOLERANCE = (0.005 - Math.SQRT2 * 0.0005) / EE_TO_MM;
+
+type Point = SvgSubpath['points'][number];
+
+// Match the footprint region policy: independent islands are representable,
+// but KiCad's separate filled polylines cannot preserve compound holes.
+function insidePolygon(point: Point, polygon: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i], b = polygon[j];
+    if ((a.y > point.y) !== (b.y > point.y) &&
+      point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+function contoursOverlap(a: Point[], b: Point[]): boolean {
+  if (insidePolygon(a[0], b) || insidePolygon(b[0], a)) return true;
+  for (let i = 0; i < a.length; i++) {
+    const p = a[i], q = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      const r = b[j], s = b[(j + 1) % b.length];
+      if (Math.max(p.x, q.x) < Math.min(r.x, s.x) || Math.max(r.x, s.x) < Math.min(p.x, q.x) ||
+        Math.max(p.y, q.y) < Math.min(r.y, s.y) || Math.max(r.y, s.y) < Math.min(p.y, q.y)) continue;
+      const pqr = (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+      const pqs = (q.x - p.x) * (s.y - p.y) - (q.y - p.y) * (s.x - p.x);
+      const rsp = (s.x - r.x) * (p.y - r.y) - (s.y - r.y) * (p.x - r.x);
+      const rsq = (s.x - r.x) * (q.y - r.y) - (s.y - r.y) * (q.x - r.x);
+      if (pqr * pqs <= 0 && rsp * rsq <= 0) return true;
+    }
+  }
+  return false;
+}
 
 // IC symbol layout constants (matching CDFER/KiCad conventions)
 const IC_PIN_LENGTH = 2.54;       // mm (100 mil) - standard pin length
@@ -89,21 +120,33 @@ export class SymbolConverter {
     const { info, symbol } = component;
 
     // Try prefix-based template first
-    let template = getSymbolTemplate(info.prefix);
+    let templatePrefix = info.prefix.toUpperCase();
+    let template = getSymbolTemplate(templatePrefix);
 
     // If no template from prefix, check if category maps to a passive template
     if (!template) {
       const category = getLibraryCategory(info.prefix, info.category, info.description);
       const categoryPrefix = CATEGORY_TO_PREFIX[category];
       if (categoryPrefix) {
+        templatePrefix = categoryPrefix;
         template = getSymbolTemplate(categoryPrefix);
       }
     }
 
     if (template && symbol.pins.length === 2) {
-      // Use fixed layout for 2-pin passives only (R, C, L, D with 2 pins)
-      // Multi-pin components (bridge rectifiers, multi-terminal LEDs) use EasyEDA layout
-      return this.generateFromTemplate(component, template, options);
+      let pins = symbol.pins;
+      if (templatePrefix === 'D' || templatePrefix === 'LED') {
+        const anode = pins.find(pin => /^(a|anode)$/i.test(pin.name.trim()));
+        const cathode = pins.find(pin => /^(k|cathode)$/i.test(pin.name.trim()));
+        if (!anode || !cathode) {
+          // Numbers alone do not establish polarity; retain the source geometry.
+          return this.generateFromShapes(component, this.getSymbolName(component, options));
+        }
+        // The template's cathode bar is below the body.
+        if (pins[0] !== anode) pins = [anode, cathode];
+      }
+      // Multi-pin components (bridge rectifiers, multi-terminal LEDs) use EasyEDA layout.
+      return this.generateFromTemplate(component, template, pins, options);
     } else {
       // Fall back to improved EasyEDA-derived layout for ICs
       return this.generateFromEasyEDA(component, options);
@@ -116,11 +159,11 @@ export class SymbolConverter {
   private generateFromTemplate(
     component: EasyEDAComponentData,
     template: SymbolTemplate,
+    pins: EasyEDAPin[],
     options: SymbolConversionOptions = {}
   ): string {
-    const { info, symbol } = component;
-    const name = options.symbolName ? this.sanitizeName(options.symbolName) : this.sanitizeName(info.name);
-    const pins = symbol.pins;
+    const { info } = component;
+    const name = this.getSymbolName(component, options);
 
     let output = this.generateSymbolStart(name);
     output += this.generateTemplateProperties(info, name, template);
@@ -140,7 +183,7 @@ export class SymbolConverter {
     options: SymbolConversionOptions = {}
   ): string {
     const { info, symbol } = component;
-    const name = options.symbolName ? this.sanitizeName(options.symbolName) : this.sanitizeName(info.name);
+    const name = this.getSymbolName(component, options);
 
     // Check if we have non-trivial shapes to render
     if (this.hasRenderableShapes(symbol)) {
@@ -151,9 +194,8 @@ export class SymbolConverter {
     const layout = this.calculateICLayout(symbol.pins);
 
     let output = this.generateSymbolStart(name, false); // Show pin numbers for ICs
-    output += this.generateProperties(info, name);
+    output += this.generateProperties(info);
     output += this.generateICGraphics(name, layout);
-    output += this.generateICPins(name, layout);
     output += this.generateSymbolEnd();
 
     return output;
@@ -193,7 +235,11 @@ export class SymbolConverter {
     const origin = symbol.origin;
 
     let output = this.generateSymbolStart(name, false);
-    output += this.generateProperties(info, name);
+    const bounds = this.calculateBoundingBox(symbol.pins, origin);
+    output += this.generateProperties(info, {
+      x: (bounds.minX + bounds.maxX) / 2,
+      top: bounds.maxY + IC_BODY_PADDING * 2,
+    });
 
     // Generate graphics unit with shapes
     output += `\t\t(symbol "${name}_0_1"\n`;
@@ -209,18 +255,16 @@ export class SymbolConverter {
       output += this.convertEllipse(ellipse, origin);
     }
     for (const polyline of symbol.polylines) {
-      output += this.convertPolyline(polyline, origin);
+      output += this.generatePolyline(this.parsePoints(polyline.points, origin), polyline.strokeWidth, polyline.fillColor, false);
     }
     for (const polygon of symbol.polygons) {
-      output += this.convertPolygon(polygon, origin);
+      output += this.generatePolyline(this.parsePoints(polygon.points, origin), polygon.strokeWidth, polygon.fillColor, true);
     }
     for (const arc of symbol.arcs) {
-      const arcOutput = this.convertArc(arc, origin);
-      if (arcOutput) output += arcOutput;
+      output += this.convertPath(arc, origin);
     }
     for (const path of symbol.paths) {
-      const pathOutput = this.convertPath(path, origin);
-      if (pathOutput) output += pathOutput;
+      output += this.convertPath(path, origin);
     }
 
     // Render decorative text elements as symbol graphics
@@ -272,6 +316,10 @@ export class SymbolConverter {
     return roundTo(Math.max(width * EE_TO_MM, 0.1), 3);
   }
 
+  private hasFill(fillColor: string): boolean {
+    return fillColor.trim() !== '' && fillColor.trim().toLowerCase() !== 'none';
+  }
+
   /**
    * Convert EasyEDA rectangle to KiCad format
    */
@@ -290,7 +338,7 @@ export class SymbolConverter {
 \t\t\t\t\t(type default)
 \t\t\t\t)
 \t\t\t\t(fill
-\t\t\t\t\t(type background)
+\t\t\t\t\t(type ${this.hasFill(rect.fillColor) ? 'outline' : 'none'})
 \t\t\t\t)
 \t\t\t)
 `;
@@ -313,162 +361,73 @@ export class SymbolConverter {
 \t\t\t\t\t(type default)
 \t\t\t\t)
 \t\t\t\t(fill
-\t\t\t\t\t(type none)
+\t\t\t\t\t(type ${this.hasFill(circle.fillColor) ? 'outline' : 'none'})
 \t\t\t\t)
 \t\t\t)
 `;
   }
 
-  /**
-   * Convert EasyEDA ellipse to KiCad format (approximated as circle if rx≈ry)
-   * KiCad symbols don't support true ellipses, so we use a circle with average radius
-   */
+  /** KiCad has no ellipse primitive; flatten unequal radii without changing their bounds. */
   private convertEllipse(ellipse: EasyEDASymbolEllipse, origin: { x: number; y: number }): string {
-    const cx = this.convertX(ellipse.cx, origin.x);
-    const cy = this.convertY(ellipse.cy, origin.y);
-    // Use average radius for approximation
-    const radius = roundTo(((ellipse.radiusX + ellipse.radiusY) / 2) * EE_TO_MM, 3);
-    const strokeWidth = this.convertStrokeWidth(ellipse.strokeWidth);
-
-    return `\t\t\t(circle
-\t\t\t\t(center ${cx} ${cy})
-\t\t\t\t(radius ${radius})
-\t\t\t\t(stroke
-\t\t\t\t\t(width ${strokeWidth})
-\t\t\t\t\t(type default)
-\t\t\t\t)
-\t\t\t\t(fill
-\t\t\t\t\t(type none)
-\t\t\t\t)
-\t\t\t)
-`;
-  }
-
-  /**
-   * Convert EasyEDA polyline to KiCad format
-   */
-  private convertPolyline(polyline: EasyEDASymbolPolyline, origin: { x: number; y: number }): string {
-    const points = this.parsePoints(polyline.points, origin);
-    if (points.length < 2) return '';
-
-    const strokeWidth = this.convertStrokeWidth(polyline.strokeWidth);
-    const pointsStr = points.map(p => `(xy ${p.x} ${p.y})`).join('\n\t\t\t\t\t');
-
-    return `\t\t\t(polyline
-\t\t\t\t(pts
-\t\t\t\t\t${pointsStr}
-\t\t\t\t)
-\t\t\t\t(stroke
-\t\t\t\t\t(width ${strokeWidth})
-\t\t\t\t\t(type default)
-\t\t\t\t)
-\t\t\t\t(fill
-\t\t\t\t\t(type none)
-\t\t\t\t)
-\t\t\t)
-`;
-  }
-
-  /**
-   * Convert EasyEDA polygon to KiCad format (closed, filled polyline)
-   */
-  private convertPolygon(polygon: EasyEDASymbolPolygon, origin: { x: number; y: number }): string {
-    const points = this.parsePoints(polygon.points, origin);
-    if (points.length < 3) return '';
-
-    const strokeWidth = this.convertStrokeWidth(polygon.strokeWidth);
-    const pointsStr = points.map(p => `(xy ${p.x} ${p.y})`).join('\n\t\t\t\t\t');
-
-    return `\t\t\t(polyline
-\t\t\t\t(pts
-\t\t\t\t\t${pointsStr}
-\t\t\t\t)
-\t\t\t\t(stroke
-\t\t\t\t\t(width ${strokeWidth})
-\t\t\t\t\t(type default)
-\t\t\t\t)
-\t\t\t\t(fill
-\t\t\t\t\t(type background)
-\t\t\t\t)
-\t\t\t)
-`;
-  }
-
-  /**
-   * Convert EasyEDA arc to KiCad format
-   * Uses SVG arc to center parameterization conversion
-   */
-  private convertArc(arc: EasyEDASymbolArc, origin: { x: number; y: number }): string | null {
-    // Parse SVG arc path
-    const params = parseSvgArcPath(arc.path);
-    if (!params) return null;
-
-    // Convert to center parameterization
-    const center = svgArcToCenter(params);
-    if (!center) return null;
-
-    // Convert coordinates from EasyEDA to KiCad
-    const cx = this.convertX(center.cx, origin.x);
-    const cy = this.convertY(center.cy, origin.y);
-    const radius = roundTo(center.rx * EE_TO_MM, 3); // Use rx (arcs are typically circular)
-
-    // Convert start and end points
-    const startX = this.convertX(params.x1, origin.x);
-    const startY = this.convertY(params.y1, origin.y);
-    const endX = this.convertX(params.x2, origin.x);
-    const endY = this.convertY(params.y2, origin.y);
-
-    // Calculate mid-point on arc for KiCad
-    const midAngle = center.startAngle + center.deltaAngle / 2;
-    const midX = roundTo(cx + radius * Math.cos(midAngle), 3);
-    const midY = roundTo(cy - radius * Math.sin(midAngle), 3); // Y inverted
-
-    const strokeWidth = this.convertStrokeWidth(arc.strokeWidth);
-
-    return `\t\t\t(arc
-\t\t\t\t(start ${startX} ${startY})
-\t\t\t\t(mid ${midX} ${midY})
-\t\t\t\t(end ${endX} ${endY})
-\t\t\t\t(stroke
-\t\t\t\t\t(width ${strokeWidth})
-\t\t\t\t\t(type default)
-\t\t\t\t)
-\t\t\t\t(fill
-\t\t\t\t\t(type none)
-\t\t\t\t)
-\t\t\t)
-`;
-  }
-
-  /**
-   * Convert EasyEDA SVG path to KiCad polyline
-   * Supports M (move), L (line), Z (close) commands
-   */
-  private convertPath(path: EasyEDASymbolPath, origin: { x: number; y: number }): string | null {
-    const points = this.parseSvgPath(path.path, origin);
-    if (points.length < 2) return null;
-
-    const strokeWidth = this.convertStrokeWidth(path.strokeWidth);
-    const hasFill = path.fillColor && path.fillColor !== 'none' && path.fillColor !== '';
-
-    let output = `\t\t\t(polyline\n`;
-    output += `\t\t\t\t(pts\n`;
-
-    for (const pt of points) {
-      output += `\t\t\t\t\t(xy ${pt.x} ${pt.y})\n`;
+    const { cx, cy, radiusX: rx, radiusY: ry } = ellipse;
+    if (!Number.isFinite(rx) || !Number.isFinite(ry) || rx <= 0 || ry <= 0) {
+      throw new Error('Cannot convert symbol ellipse: radii must be finite and positive');
     }
+    if (rx === ry) return this.convertCircle({ ...ellipse, radius: rx }, origin);
+    return this.convertPath({
+      ...ellipse,
+      path: `M ${cx + rx} ${cy} A ${rx} ${ry} 0 0 1 ${cx} ${cy + ry} A ${rx} ${ry} 0 0 1 ${cx - rx} ${cy} A ${rx} ${ry} 0 0 1 ${cx} ${cy - ry} A ${rx} ${ry} 0 0 1 ${cx + rx} ${cy} Z`,
+    }, origin);
+  }
 
-    output += `\t\t\t\t)\n`;
-    output += `\t\t\t\t(stroke\n`;
-    output += `\t\t\t\t\t(width ${strokeWidth})\n`;
-    output += `\t\t\t\t\t(type default)\n`;
-    output += `\t\t\t\t)\n`;
-    output += `\t\t\t\t(fill\n`;
-    output += `\t\t\t\t\t(type ${hasFill ? 'outline' : 'none'})\n`;
-    output += `\t\t\t\t)\n`;
-    output += `\t\t\t)\n`;
+  /** Flatten each SVG contour separately, retaining closure and source fill. */
+  private convertPath(path: EasyEDASymbolPath, origin: { x: number; y: number }): string {
+    const subpaths = flattenSvgPath(path.path, CURVE_TOLERANCE);
+    if (this.hasFill(path.fillColor)) {
+      for (const { points } of subpaths) {
+        const area = points.reduce((sum, point, i) => {
+          const next = points[(i + 1) % points.length];
+          return sum + point.x * next.y - point.y * next.x;
+        }, 0);
+        if (points.length < 3 || Math.abs(area) < 1e-12) {
+          throw new Error('Cannot convert filled symbol path: degenerate contour');
+        }
+      }
+      for (let i = 0; i < subpaths.length; i++) {
+        for (let j = i + 1; j < subpaths.length; j++) {
+          if (contoursOverlap(subpaths[i].points, subpaths[j].points)) {
+            throw new Error('Cannot convert filled symbol path: compound contours contain holes or overlap');
+          }
+        }
+      }
+    }
+    return subpaths.map(subpath => this.generatePolyline(
+      subpath.points.map(point => ({ x: this.convertX(point.x, origin.x), y: this.convertY(point.y, origin.y) })),
+      path.strokeWidth, path.fillColor, subpath.closed,
+    )).join('');
+  }
 
-    return output;
+  private generatePolyline(points: Point[], strokeWidth: number, fillColor: string, closed: boolean): string {
+    if (points.length < 2) return '';
+    const filled = this.hasFill(fillColor);
+    // SVG fill implicitly closes an open contour.
+    if (closed || filled) {
+      const first = points[0], last = points[points.length - 1];
+      if (first.x !== last.x || first.y !== last.y) points.push(first);
+    }
+    return `\t\t\t(polyline
+\t\t\t\t(pts
+\t\t\t\t\t${points.map(point => `(xy ${point.x} ${point.y})`).join('\n\t\t\t\t\t')}
+\t\t\t\t)
+\t\t\t\t(stroke
+\t\t\t\t\t(width ${this.convertStrokeWidth(strokeWidth)})
+\t\t\t\t\t(type default)
+\t\t\t\t)
+\t\t\t\t(fill
+\t\t\t\t\t(type ${filled ? 'outline' : 'none'})
+\t\t\t\t)
+\t\t\t)
+`;
   }
 
   /**
@@ -502,48 +461,6 @@ export class SymbolConverter {
   }
 
   /**
-   * Parse SVG path string (M/L/Z commands) to array of points
-   * Format: "M x1,y1 L x2,y2 L x3,y3 Z" or "M x1 y1 L x2 y2 ..."
-   */
-  private parseSvgPath(pathStr: string, origin: { x: number; y: number }): Array<{ x: number; y: number }> {
-    const points: Array<{ x: number; y: number }> = [];
-    let firstPoint: { x: number; y: number } | null = null;
-
-    // Match M and L commands with coordinates (supports both comma and space separators)
-    const commandRegex = /([MLZ])\s*([\d.-]+)?[,\s]*([\d.-]+)?/gi;
-    let match;
-
-    while ((match = commandRegex.exec(pathStr)) !== null) {
-      const cmd = match[1].toUpperCase();
-
-      if (cmd === 'M' || cmd === 'L') {
-        const x = parseFloat(match[2]);
-        const y = parseFloat(match[3]);
-
-        if (!isNaN(x) && !isNaN(y)) {
-          const point = {
-            x: this.convertX(x, origin.x),
-            y: this.convertY(y, origin.y),
-          };
-          points.push(point);
-
-          if (cmd === 'M' && !firstPoint) {
-            firstPoint = point;
-          }
-        }
-      } else if (cmd === 'Z' && firstPoint) {
-        // Close path - add first point if not already there
-        const lastPoint = points[points.length - 1];
-        if (lastPoint && (lastPoint.x !== firstPoint.x || lastPoint.y !== firstPoint.y)) {
-          points.push({ ...firstPoint });
-        }
-      }
-    }
-
-    return points;
-  }
-
-  /**
    * Parse space-separated point string to array of {x, y}
    */
   private parsePoints(pointsStr: string, origin: { x: number; y: number }): Array<{ x: number; y: number }> {
@@ -564,11 +481,11 @@ export class SymbolConverter {
    * Generate a pin using EasyEDA coordinates and rotation
    *
    * EasyEDA: pin.x/y is the WIRE connection point (junction)
-   *          rotation points FROM wire TO body
+   *          rotation points FROM body TO wire
    * KiCad: pin position is the WIRE connection point
    *        rotation points FROM wire TO body
    *
-   * So we just need coordinate conversion with Y-flip!
+   * Positions need a Y flip; counterclockwise pin angles need a 180° reversal.
    */
   private generateShapePin(pin: EasyEDAPin, origin: { x: number; y: number }): string {
     const pinType = this.mapPinType(pin.electricalType);
@@ -578,7 +495,7 @@ export class SymbolConverter {
     const y = this.convertY(pin.y, origin.y);
 
     // Map EasyEDA rotation to KiCad rotation
-    // Both point FROM wire TO body, but Y-axis is flipped
+    // Both formats use counterclockwise angles, but opposite pin directions.
     const rotation = this.mapPinRotation(pin.rotation);
 
     // Convert pin length
@@ -613,19 +530,13 @@ export class SymbolConverter {
   /**
    * Map EasyEDA pin rotation to KiCad rotation
    *
-   * EasyEDA: rotation indicates direction pin EXTENDS from wire (away from body)
-   * KiCad: rotation indicates direction pin POINTS (from wire toward body)
-   *
-   * So we need to flip by 180°, then account for Y-axis flip:
-   * - EasyEDA 0 (extends right, body on left) -> KiCad 180 (points left toward body)
-   * - EasyEDA 180 (extends left, body on right) -> KiCad 0 (points right toward body)
-   * - EasyEDA 90 (extends down, body on top) -> KiCad 90 (points up toward body, Y-flipped)
-   * - EasyEDA 270 (extends up, body on bottom) -> KiCad 270 (points down toward body, Y-flipped)
+   * Both formats use counterclockwise angles. EasyEDA describes body-to-wire,
+   * whereas KiCad describes wire-to-body, so reverse the direction by 180°.
+   * EasyEDA 90 maps to KiCad 270; EasyEDA 270 maps to KiCad 90.
    */
   private mapPinRotation(eeRotation: number): number {
     const normalized = ((eeRotation % 360) + 360) % 360;
-    // Flip 180° to point toward body instead of away
-    // Then swap vertical due to Y-flip (but 180° flip already handles this naturally)
+    // Coordinate Y inversion does not reverse this angle convention.
     return (normalized + 180) % 360;
   }
 
@@ -660,7 +571,6 @@ export class SymbolConverter {
     const topY = (halfPins - 1) * IC_PIN_SPACING;
     const bodyHeight = topY + IC_PIN_SPACING * 2; // Add padding top and bottom
     const bodyWidth = IC_BODY_HALF_WIDTH * 2;
-    const halfHeight = bodyHeight / 2;
 
     // Pin X positions (body edge + pin length)
     const leftX = roundTo(-(IC_BODY_HALF_WIDTH + IC_PIN_LENGTH), 2);
@@ -765,13 +675,6 @@ export class SymbolConverter {
     return output;
   }
 
-  /**
-   * Generate empty IC pins unit (pins are in _0_1 for CDFER compatibility)
-   */
-  private generateICPins(name: string, layout: ICLayout): string {
-    // No _1_1 unit needed - all pins in _0_1
-    return '';
-  }
 
   /**
    * Create a new library file with multiple symbols
@@ -800,6 +703,10 @@ export class SymbolConverter {
       throw new Error('Invalid library file format: missing closing parenthesis');
     }
 
+    if (this.symbolExistsInLibrary(existingLibraryContent, this.getSymbolName(component, options))) {
+      return existingLibraryContent;
+    }
+
     // Remove the last closing paren
     const withoutClose = trimmed.slice(0, -1);
 
@@ -813,9 +720,15 @@ export class SymbolConverter {
    */
   symbolExistsInLibrary(libraryContent: string, componentName: string): boolean {
     const sanitizedName = this.sanitizeName(componentName);
-    // Look for (symbol "NAME" pattern
-    const pattern = new RegExp(`\\(symbol\\s+"${sanitizedName}"`, 'm');
-    return pattern.test(libraryContent);
+    return this.findSymbolRange(libraryContent, sanitizedName) !== undefined;
+  }
+
+  private findSymbolRange(libraryContent: string, sanitizedName: string): { start: number; end: number } | undefined {
+    const pattern = new RegExp(`^\\(\\s*symbol\\s+"${sanitizedName}"`);
+    for (const range of childExpressions(libraryContent)) {
+      if (pattern.test(libraryContent.slice(range.start, range.end))) return range;
+    }
+    return undefined;
   }
 
   /**
@@ -827,72 +740,21 @@ export class SymbolConverter {
     component: EasyEDAComponentData,
     options: SymbolConversionOptions = {}
   ): string {
-    const sanitizedName = this.sanitizeName(component.info.name);
-
-    // Check if symbol exists
-    if (!this.symbolExistsInLibrary(existingLibraryContent, component.info.name)) {
-      // Symbol doesn't exist, just append it
+    const sanitizedName = this.getSymbolName(component, options);
+    const range = this.findSymbolRange(existingLibraryContent, sanitizedName);
+    if (!range) {
       return this.appendToLibrary(existingLibraryContent, component, options);
     }
 
-    // Remove the existing symbol
-    // Symbol format: (symbol "NAME" ... ) with nested parens
-    // We need to find the start and match balanced parens to find the end
-
-    const symbolStart = existingLibraryContent.indexOf(`(symbol "${sanitizedName}"`);
-    if (symbolStart === -1) {
-      // Shouldn't happen since we checked above, but fallback to append
-      return this.appendToLibrary(existingLibraryContent, component, options);
-    }
-
-    // Find the matching closing paren by counting balance
-    let depth = 0;
-    let symbolEnd = symbolStart;
-    let inString = false;
-    let prevChar = '';
-
-    for (let i = symbolStart; i < existingLibraryContent.length; i++) {
-      const char = existingLibraryContent[i];
-
-      // Handle string escaping
-      if (char === '"' && prevChar !== '\\') {
-        inString = !inString;
-      }
-
-      if (!inString) {
-        if (char === '(') depth++;
-        if (char === ')') {
-          depth--;
-          if (depth === 0) {
-            symbolEnd = i + 1;
-            break;
-          }
-        }
-      }
-
-      prevChar = char;
-    }
-
-    // Remove the old symbol (including any trailing newline)
-    let contentWithoutOldSymbol = existingLibraryContent.slice(0, symbolStart);
-    let afterSymbol = existingLibraryContent.slice(symbolEnd);
-
-    // Trim leading newlines from afterSymbol to avoid double spacing
-    while (afterSymbol.startsWith('\n')) {
-      afterSymbol = afterSymbol.slice(1);
-    }
-
-    contentWithoutOldSymbol = contentWithoutOldSymbol + afterSymbol;
-
-    // Now append the new version
-    return this.appendToLibrary(contentWithoutOldSymbol, component, options);
+    const newSymbol = this.convertToSymbolEntry(component, options).trim();
+    return existingLibraryContent.slice(0, range.start) + newSymbol + existingLibraryContent.slice(range.end);
   }
 
   /**
    * Get the sanitized symbol name for a component
    */
-  getSymbolName(component: EasyEDAComponentData): string {
-    return this.sanitizeName(component.info.name);
+  getSymbolName(component: EasyEDAComponentData, options: SymbolConversionOptions = {}): string {
+    return this.sanitizeName(options.symbolName || component.info.name);
   }
 
   /**
@@ -935,7 +797,7 @@ export class SymbolConverter {
   /**
    * Generate KiCad property entries in KiCad 9 format
    */
-  private generateProperties(info: EasyEDAComponentData['info'], name: string): string {
+  private generateProperties(info: EasyEDAComponentData['info'], placement = { x: 0, top: 5.08 }): string {
     const ts = KICAD_DEFAULTS.TEXT_SIZE;
     let props = '';
 
@@ -950,7 +812,7 @@ export class SymbolConverter {
     // Reference property - centered above body (CDFER style, no "?" suffix)
     const refDesignator = (info.prefix || 'U').replace(/\?$/, '');
     props += `\t\t(property "Reference" "${refDesignator}"
-\t\t\t(at 0 10.16 0)
+\t\t\t(at ${roundTo(placement.x, 3)} ${roundTo(placement.top + 5.08, 3)} 0)
 \t\t\t(effects
 \t\t\t\t(font
 \t\t\t\t\t(size ${ts} ${ts})
@@ -961,7 +823,7 @@ export class SymbolConverter {
 
     // Value property - centered below reference (CDFER style)
     props += `\t\t(property "Value" "${this.sanitizeText(displayValue)}"
-\t\t\t(at 0 7.62 0)
+\t\t\t(at ${roundTo(placement.x, 3)} ${roundTo(placement.top + 2.54, 3)} 0)
 \t\t\t(effects
 \t\t\t\t(font
 \t\t\t\t\t(size ${ts} ${ts})
@@ -1605,7 +1467,7 @@ ${template.bodyGraphics}
 
     // For 2-pin components, place at fixed positions
     if (pins.length === 2) {
-      // Pin 1 at top (270° points down toward body)
+      // First pin at top (270° points down toward body)
       const pin1 = pins[0];
       output += `\t\t\t(pin passive line
 \t\t\t\t(at 0 ${halfSpacing} 270)
@@ -1627,7 +1489,7 @@ ${template.bodyGraphics}
 \t\t\t)
 `;
 
-      // Pin 2 at bottom (90° points up toward body)
+      // Second pin at bottom (90° points up toward body)
       const pin2 = pins[1];
       output += `\t\t\t(pin passive line
 \t\t\t\t(at 0 ${-halfSpacing} 90)

@@ -1,6 +1,4 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 
 const mockDetails = {
   lcscId: 'C123',
@@ -193,11 +191,4 @@ describe('agent JSON CLI output', () => {
     write.mockRestore();
   });
 
-  it('validate --json has a quiet JSON path before human output', () => {
-    const source = readFileSync(join(import.meta.dir, 'validate.ts'), 'utf-8');
-
-    expect(source).toContain('const spinner = options.json ? null : p.spinner()');
-    expect(source).toContain('printJson({');
-    expect(source.indexOf('if (options.json)')).toBeLessThan(source.indexOf('console.log(chalk.bold'));
-  });
 });

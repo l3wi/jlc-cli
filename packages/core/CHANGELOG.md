@@ -1,5 +1,23 @@
 # @jlcpcb/core
 
+## Unreleased
+
+### Patch Changes
+
+- Correct browser capsule/custom-pad geometry, rotation and drill offsets, roundrect radii, arc sweeps/bounds, visible annotations, and rule-area display.
+- Preserve complete symbol paths, unequal ellipses, separate contours, and source fills; position visible properties with source geometry and reject unrepresentable compound fills.
+- Repair symbol pin validation units, direction conventions, identities, names, and electrical semantics; reject unknown evidence and disclose unvalidated graphics scope.
+- Preserve custom-pad copper boundaries, rotated/offset slots, NPTH semantics, complete courtyards, and repeated/relative SVG curve geometry.
+- Reject missing or contradictory drill dimensions and unsupported cutout semantics instead of inventing drills or filling excluded copper.
+- Restrict nominal KiCad substitution to recognized compatible R/C/L packages, accept reference-designator placeholders, and retain source pad identities.
+- Validate manufacturing geometry, layers, plating, holes, and vias without permissive false passes; verify live fixture part/package identities.
+
+- Preserve unrelated symbols and shared footprints during removal; use exact, quote-aware top-level symbol identities for replacement.
+- Preserve diode polarity and passive pad identifiers, calculate SVG arc geometry correctly, and extract capacitor values from capacitance units.
+- Return qualified installed symbol references and register project libraries under matching category names.
+- Resolve project-local 3D models through `KIPRJMOD` and use the detected KiCad version for global library variables.
+- Remove executable query injection from the component browser and share library path and symbol-range utilities across consumers.
+
 ## 0.4.0
 
 ### Minor Changes

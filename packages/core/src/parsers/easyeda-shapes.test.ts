@@ -24,4 +24,21 @@ describe('parseFootprintShapes', () => {
       },
     });
   });
+
+  it('preserves explicit unplated drills without changing legacy plated pads', () => {
+    const parsed = parseFootprintShapes([
+      'PAD~ELLIPSE~0~0~8~8~11~~1~2~~0~npth~0~~N~false',
+      'PAD~ELLIPSE~10~0~8~8~11~~2~2~~0~pth',
+    ]);
+    expect(parsed.pads.map(pad => pad.isPlated)).toEqual([false, true]);
+    expect(parsed.type).toBe('tht');
+  });
+
+  it('does not classify undrilled polygon copper as a through-hole footprint', () => {
+    const parsed = parseFootprintShapes([
+      'PAD~POLYGON~0~0~4~4~1~~1~0~-2 -2 2 -2 2 2 -2 2~0~polygon~0~~Y~false',
+    ]);
+    expect(parsed.pads[0].isPlated).toBe(true);
+    expect(parsed.type).toBe('smd');
+  });
 });

@@ -1,4 +1,4 @@
-import type { ComponentSearchResult, ComponentDetails, InstallResult, InstalledComponent, LibraryStatus, EasyEDACommunityComponent } from '@jlcpcb/core';
+import type { ComponentSearchResult, ComponentDetails, InstallOptions, InstallResult, InstalledComponent, LibraryStatus, EasyEDACommunityComponent, SearchOptions } from '@jlcpcb/core';
 
 export type ScreenName = 'search' | 'info' | 'install' | 'library' | 'library-setup' | 'installed' | 'easyeda-info';
 
@@ -8,16 +8,21 @@ export type ComponentInfo = ComponentSearchResult | ComponentDetails;
 export interface SearchParams {
   query: string;
   results: ComponentSearchResult[];
+  searchOptions?: SearchOptions;
+  selectedIndex?: number;
+  installOptions?: InstallOptions;
 }
 
 export interface InfoParams {
   componentId: string;
   component?: ComponentInfo;
+  installOptions?: InstallOptions;
 }
 
 export interface InstallParams {
   componentId: string;
   component: ComponentInfo;
+  installOptions?: InstallOptions;
 }
 
 export interface LibraryParams {
@@ -28,6 +33,7 @@ export interface LibraryParams {
 export interface LibrarySetupParams {
   componentId: string;
   component: ComponentInfo;
+  installOptions?: InstallOptions;
 }
 
 export interface InstalledParams {
@@ -40,6 +46,7 @@ export interface InstalledParams {
 export interface EasyEDAInfoParams {
   uuid: string;
   component?: EasyEDACommunityComponent;
+  installOptions?: InstallOptions;
 }
 
 export interface ScreenParams {

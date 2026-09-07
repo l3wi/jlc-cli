@@ -91,8 +91,7 @@ export async function handleRequest(
 
   // Route requests
   if (pathname === '/' || pathname === '/index.html') {
-    const query = url.searchParams.get('q') || undefined
-    serveHtml(res, query)
+    serveHtml(res)
   } else if (pathname === '/api/search') {
     await handleSearch(url, res)
   } else if (pathname.startsWith('/api/component/')) {
@@ -108,16 +107,10 @@ export async function handleRequest(
 }
 
 /**
- * Serve the HTML page with optional initial query injection
+ * Serve the HTML page. The browser reads the initial query from the URL.
  */
-function serveHtml(res: ServerResponse, initialQuery?: string): void {
-  let html = getHtmlPage()
-
-  if (initialQuery) {
-    // Inject initial query via a script tag before </head>
-    const script = `<script>window.__INITIAL_QUERY__ = ${JSON.stringify(initialQuery)};</script>`
-    html = html.replace('</head>', `${script}</head>`)
-  }
+function serveHtml(res: ServerResponse): void {
+  const html = getHtmlPage()
 
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
   res.end(html)

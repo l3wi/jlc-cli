@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { createComponentService, createLibraryService, type EasyEDACommunityComponent } from '@jlcpcb/core';
-import { useNavigation, useCurrentScreen } from '../navigation/NavigationContext.js';
+import { useCurrentScreen } from '../navigation/NavigationContext.js';
 import type { EasyEDAInfoParams } from '../navigation/types.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { EasyEDADetailView } from '../components/EasyEDADetailView.js';
@@ -10,7 +10,6 @@ const componentService = createComponentService();
 const libraryService = createLibraryService();
 
 export function EasyEDAInfoScreen() {
-  const { replace } = useNavigation();
   const { params } = useCurrentScreen() as { screen: 'easyeda-info'; params: EasyEDAInfoParams };
   const { columns: terminalWidth } = useTerminalSize();
 
@@ -32,15 +31,14 @@ export function EasyEDAInfoScreen() {
       }
 
       try {
-        // Ensure global tables are set up
-        await libraryService.ensureGlobalTables();
+        if (!params.installOptions?.projectPath) await libraryService.ensureGlobalTables();
 
         // Fetch component
         const fetched = await componentService.fetchCommunity(params.uuid);
         if (fetched) {
           setComponent(fetched);
           // Check if already installed
-          const installed = await libraryService.isEasyEDAInstalled(fetched.title);
+          const installed = await libraryService.isEasyEDAInstalled(fetched.title, params.installOptions?.projectPath);
           setIsInstalled(installed);
         } else {
           setError('Component not found');
@@ -53,7 +51,7 @@ export function EasyEDAInfoScreen() {
     };
 
     init();
-  }, [params.uuid]);
+  }, [params.uuid, params.installOptions?.projectPath]);
 
   useInput((input, key) => {
     if (isLoading || !component || isInstalling) return;
@@ -67,7 +65,7 @@ export function EasyEDAInfoScreen() {
       setIsInstalling(true);
       setStatusMessage('Regenerating symbol and footprint...');
 
-      libraryService.install(params.uuid, { force: true })
+      libraryService.install(params.uuid, { ...params.installOptions, force: true })
         .then((result) => {
           setStatusMessage(`✓ Reinstalled: ${result.symbolRef}`);
           setIsInstalled(true);
@@ -92,8 +90,8 @@ export function EasyEDAInfoScreen() {
       setStatusMessage('Installing component...');
 
       // Ensure libraries are set up
-      libraryService.ensureGlobalTables()
-        .then(() => libraryService.install(params.uuid, {}))
+      (params.installOptions?.projectPath ? Promise.resolve() : libraryService.ensureGlobalTables())
+        .then(() => libraryService.install(params.uuid, params.installOptions))
         .then((result) => {
           if (result.symbolAction === 'exists') {
             setStatusMessage(`⚡ Already installed (use R to reinstall)`);

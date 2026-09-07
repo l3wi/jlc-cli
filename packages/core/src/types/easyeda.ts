@@ -325,6 +325,7 @@ export interface EasyEDAText {
  */
 export interface EasyEDASolidRegion {
   layerId: number;
+  net?: string;           // Named cutouts have net-dependent copper-area semantics
   path: string;            // SVG path with M/L/Z commands (e.g., "M425,230L445,230L445,220L425,220Z")
   fillType: string;        // "solid", "none", etc.
   id: string;

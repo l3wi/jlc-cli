@@ -1,58 +1,55 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { createComponentService, type ComponentSearchResult } from '@jlcpcb/core';
+import { createComponentService } from '@jlcpcb/core';
 import { useNavigation, useCurrentScreen } from '../navigation/NavigationContext.js';
 import type { SearchParams } from '../navigation/types.js';
-import { useAppState } from '../state/AppStateContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { ListView } from '../components/ListView.js';
 
 const componentService = createComponentService();
 
 export function SearchScreen() {
-  const { push } = useNavigation();
+  const { push, replace } = useNavigation();
   const { params } = useCurrentScreen() as { screen: 'search'; params: SearchParams };
-  const { selectedIndex, setSelectedIndex, isFiltered, setIsFiltered, resetSelection } = useAppState();
   const { columns: terminalWidth } = useTerminalSize();
 
-  const [results, setResults] = useState<ComponentSearchResult[]>(params.results);
+  const { results, selectedIndex = 0 } = params;
+  const isFiltered = params.searchOptions?.basicOnly ?? false;
   const [isSearching, setIsSearching] = useState(false);
 
   useInput(async (input, key) => {
     if (isSearching) return;
 
     if (key.upArrow) {
-      setSelectedIndex(Math.max(0, selectedIndex - 1));
+      replace('search', { ...params, selectedIndex: Math.max(0, selectedIndex - 1) });
     } else if (key.downArrow) {
-      setSelectedIndex(Math.min(results.length - 1, selectedIndex + 1));
+      replace('search', { ...params, selectedIndex: Math.max(0, Math.min(results.length - 1, selectedIndex + 1)) });
     } else if (key.return && results[selectedIndex]) {
       const selected = results[selectedIndex];
       if (selected.idType === 'easyeda_uuid') {
         push('easyeda-info', {
           uuid: selected.easyedaUuid ?? selected.id,
+          installOptions: params.installOptions,
         });
       } else {
         push('info', {
           componentId: selected.lcscId ?? selected.id,
           component: selected,
+          installOptions: params.installOptions,
         });
       }
     } else if (key.tab) {
       setIsSearching(true);
       const newFiltered = !isFiltered;
       try {
-        let newResults = await componentService.search(params.query, {
-          limit: 20,
-          basicOnly: newFiltered,
-        });
+        const searchOptions = { ...params.searchOptions, basicOnly: newFiltered };
+        let newResults = await componentService.search(params.query, searchOptions);
         newResults = newResults.sort((a, b) => {
           if (a.libraryType === 'basic' && b.libraryType !== 'basic') return -1;
           if (a.libraryType !== 'basic' && b.libraryType === 'basic') return 1;
           return 0;
         });
-        setResults(newResults);
-        resetSelection();
-        setIsFiltered(newFiltered);
+        replace('search', { ...params, results: newResults, searchOptions, selectedIndex: 0 });
       } catch {
         // Keep existing results on error
       }

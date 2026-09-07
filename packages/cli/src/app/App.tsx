@@ -36,7 +36,7 @@ function ScreenRouter() {
 
 function AppContent() {
   const { exit } = useApp();
-  const { pop, currentIndex, history } = useNavigation();
+  const { pop, currentIndex } = useNavigation();
   const { screen } = useCurrentScreen();
 
   useInput((input, key) => {

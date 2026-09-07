@@ -6,7 +6,7 @@
  * Run with: bun test packages/core/src/testing/footprint.test.ts
  */
 
-import { describe, it, expect, beforeAll } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { easyedaClient } from '../api/easyeda.js';
 import { footprintConverter } from '../converter/footprint.js';
 import { fetchReferenceSVG } from './reference-fetcher.js';
@@ -64,6 +64,13 @@ async function validateFootprint(
       };
     }
 
+    if (component.expectedMpn !== undefined && componentData.info.name !== component.expectedMpn) {
+      throw new Error(`Fixture MPN differs: expected ${component.expectedMpn}, got ${componentData.info.name}`);
+    }
+    if (component.expectedPackage !== undefined && componentData.footprint.name !== component.expectedPackage) {
+      throw new Error(`Fixture package differs: expected ${component.expectedPackage}, got ${componentData.footprint.name}`);
+    }
+
     // 3. Convert to KiCad format
     const kicadContent = footprintConverter.convert(componentData, {});
 
@@ -71,15 +78,8 @@ async function validateFootprint(
     const referenceData = extractFromReferenceSVG(reference.footprintSvg);
     const generatedData = extractFromKiCadFootprint(kicadContent);
 
-    // 5. Compare
-    // Note: Position validation is currently imprecise due to different
-    // coordinate origins between reference SVG and KiCad output.
-    // The reference uses viewBox-relative coords, KiCad uses centroid-based.
-    // For now, we focus on pad count and report position differences as warnings.
-    const comparison = compareFootprints(referenceData, generatedData, {
-      sizeWarningsOnly: true, // Size differences are often acceptable
-      positionTolerance: 50, // Very lenient for now - validates structure not exact position
-    });
+    // Manufacturing differences and incomplete reference evidence are blocking.
+    const comparison = compareFootprints(referenceData, generatedData);
 
     return {
       lcscCode: component.lcsc,
@@ -134,6 +134,7 @@ describe('Footprint Validation', () => {
 
             // Assertions
             expect(result.error).toBeUndefined();
+            expect(result.passed).toBe(true);
 
             if (result.footprint) {
               // Pad count should match
@@ -165,25 +166,17 @@ describe('Footprint Validation', () => {
 
 describe('Quick Validation (CI)', () => {
   // Test a small representative sample of components with known good reference SVGs
-  const quickTestComponents = [
-    { lcsc: 'C25076', name: '0402 Capacitor' },
-    { lcsc: 'C25111', name: '0603 Resistor' },
-    { lcsc: 'C22467599', name: 'MicroSD Socket' },
-  ];
+  const quickTestComponents = getAllTestComponents().filter(component =>
+    ['C25076', 'C25111', 'C22467599'].includes(component.lcsc));
 
   for (const component of quickTestComponents) {
     it(
       `${component.name} (${component.lcsc})`,
       async () => {
-        const testComp: TestComponent = {
-          lcsc: component.lcsc,
-          name: component.name,
-          features: [],
-        };
-
-        const result = await validateFootprint(testComp);
+        const result = await validateFootprint(component);
 
         expect(result.error).toBeUndefined();
+        expect(result.passed).toBe(true);
         if (result.footprint) {
           expect(result.footprint.padCountMatch).toBe(true);
         }

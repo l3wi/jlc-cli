@@ -37,7 +37,7 @@ export function NavigationProvider<T extends ScreenName>({
 
   const pop = useCallback(() => {
     if (currentIndex > 0) {
-      setCurrentIndex((prev) => prev - 1);
+      setCurrentIndex((prev) => Math.max(0, prev - 1));
       return true;
     }
     return false;

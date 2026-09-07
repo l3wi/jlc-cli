@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { createLibraryService, type InstallResult } from '@jlcpcb/core';
 import { useNavigation, useCurrentScreen } from '../navigation/NavigationContext.js';
@@ -10,14 +10,12 @@ export function InstallScreen() {
   const { replace } = useNavigation();
   const { params } = useCurrentScreen() as { screen: 'install'; params: InstallParams };
 
-  const [status, setStatus] = useState<'installing' | 'done'>('installing');
-
   useEffect(() => {
     let mounted = true;
 
     async function install() {
       try {
-        const result: InstallResult = await libraryService.install(params.componentId, {});
+        const result: InstallResult = await libraryService.install(params.componentId, params.installOptions);
         if (mounted) {
           replace('installed', {
             componentId: params.componentId,
@@ -41,7 +39,7 @@ export function InstallScreen() {
     return () => {
       mounted = false;
     };
-  }, [params.componentId, params.component, replace]);
+  }, [params.componentId, params.component, params.installOptions, replace]);
 
   return (
     <Box flexDirection="column">

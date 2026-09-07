@@ -58,7 +58,7 @@ export async function searchCommand(query: string, options: SearchCommandOptions
 
     // Clear the "Searching..." line and launch interactive UI
     process.stdout.write('\x1b[1A\x1b[2K');
-    await renderApp('search', { query, results });
+    await renderApp('search', { query, results, searchOptions: options });
   } catch (error) {
     if (options.json) {
       printJsonError('search_failed', getErrorMessage(error), { retryable: true });

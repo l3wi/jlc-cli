@@ -58,6 +58,12 @@ async function validateSymbol(component: TestComponent): Promise<ValidationResul
         error: 'Failed to fetch component data from EasyEDA',
       };
     }
+    if (component.expectedMpn !== undefined && componentData.info.name !== component.expectedMpn) {
+      throw new Error(`Fixture MPN differs: expected ${component.expectedMpn}, got ${componentData.info.name}`);
+    }
+    if (component.expectedPackage !== undefined && componentData.footprint.name !== component.expectedPackage) {
+      throw new Error(`Fixture package differs: expected ${component.expectedPackage}, got ${componentData.footprint.name}`);
+    }
 
     // 3. Convert to KiCad format
     const kicadContent = symbolConverter.convert(componentData, {
@@ -68,11 +74,8 @@ async function validateSymbol(component: TestComponent): Promise<ValidationResul
     const referenceData = extractFromReferenceSVG(reference.symbolSvg);
     const generatedData = extractFromKiCadSymbol(kicadContent);
 
-    // 5. Compare (with lenient tolerance for coordinate differences)
-    const comparison = compareSymbols(referenceData, generatedData, {
-      positionTolerance: 50, // Very lenient for symbols
-      ignorePinNames: false,
-    });
+    // Source geometry is checked strictly, including intentional template differences.
+    const comparison = compareSymbols(referenceData, generatedData);
 
     return {
       lcscCode: component.lcsc,
@@ -113,9 +116,12 @@ describe('Symbol Validation', () => {
           `${component.lcsc} - ${component.name}`,
           async () => {
             const result = await validateSymbol(component);
+            const expectedErrors = [...(component.expectedSymbolErrors ?? [])];
+            const byPinAndField = (a: { pinNumber: string; field: string }, b: { pinNumber: string; field: string }) =>
+              `${a.pinNumber}:${a.field}`.localeCompare(`${b.pinNumber}:${b.field}`);
 
             // Log result for debugging
-            if (!result.passed) {
+            if (result.error || result.passed !== (expectedErrors.length === 0)) {
               console.log(`\n[${component.lcsc}] ${component.name}`);
               if (result.error) {
                 console.log(`  Error: ${result.error}`);
@@ -126,6 +132,13 @@ describe('Symbol Validation', () => {
 
             // Assertions
             expect(result.error).toBeUndefined();
+            expect(result.symbol).not.toBeNull();
+            // Known source deficiencies and deliberate templates remain failures.
+            // Assert exact error identities rather than tolerating arbitrary differences.
+            expect(result.passed).toBe(expectedErrors.length === 0);
+            const errors = [...result.symbol!.errors].sort(byPinAndField);
+            expect(errors).toHaveLength(expectedErrors.length);
+            expect(errors).toMatchObject(expectedErrors.sort(byPinAndField));
 
             if (result.symbol) {
               // Pin count should match
@@ -147,118 +160,4 @@ describe('Symbol Validation', () => {
       }
     });
   }
-});
-
-// =============================================================================
-// Unit Tests for Comparator Functions
-// =============================================================================
-
-describe('Symbol Comparator', () => {
-  describe('extractFromKiCadSymbol', () => {
-    it('extracts basic pins', () => {
-      const sexp = `
-        (symbol "TEST"
-          (pin input line (at -5.08 2.54 0) (length 2.54)
-            (name "IN") (number "1"))
-          (pin output line (at 5.08 2.54 180) (length 2.54)
-            (name "OUT") (number "2"))
-        )
-      `;
-
-      const data = extractFromKiCadSymbol(sexp);
-
-      expect(data.pins).toHaveLength(2);
-      expect(data.pins[0].number).toBe('1');
-      expect(data.pins[0].name).toBe('IN');
-      expect(data.pins[0].electrical).toBe('input');
-      expect(data.pins[1].number).toBe('2');
-      expect(data.pins[1].name).toBe('OUT');
-      expect(data.pins[1].electrical).toBe('output');
-    });
-
-    it('extracts power pins', () => {
-      const sexp = `
-        (symbol "TEST"
-          (pin power_in line (at 0 5.08 270) (length 2.54)
-            (name "VCC") (number "3"))
-          (pin power_in line (at 0 -5.08 90) (length 2.54)
-            (name "GND") (number "4"))
-        )
-      `;
-
-      const data = extractFromKiCadSymbol(sexp);
-
-      expect(data.pins).toHaveLength(2);
-      expect(data.pins[0].name).toBe('VCC');
-      expect(data.pins[0].electrical).toBe('power_in');
-      expect(data.pins[1].name).toBe('GND');
-      expect(data.pins[1].electrical).toBe('power_in');
-    });
-  });
-
-  describe('compareSymbols', () => {
-    it('passes when pins match', () => {
-      const reference = {
-        pins: [
-          { number: '1', name: 'IN', x: 0, y: 0, rotation: 0, electrical: 'input' as const },
-          { number: '2', name: 'OUT', x: 1, y: 0, rotation: 180, electrical: 'output' as const },
-        ],
-        bounds: { minX: 0, maxX: 1, minY: 0, maxY: 0 },
-      };
-
-      const generated = {
-        pins: [
-          { number: '1', name: 'IN', x: 0, y: 0, rotation: 0, electrical: 'input' as const },
-          { number: '2', name: 'OUT', x: 1, y: 0, rotation: 180, electrical: 'output' as const },
-        ],
-        bounds: { minX: 0, maxX: 1, minY: 0, maxY: 0 },
-      };
-
-      const result = compareSymbols(reference, generated);
-
-      expect(result.passed).toBe(true);
-      expect(result.pinCountMatch).toBe(true);
-      expect(result.errors).toHaveLength(0);
-    });
-
-    it('fails when pin count differs', () => {
-      const reference = {
-        pins: [{ number: '1', name: 'IN', x: 0, y: 0, rotation: 0, electrical: 'input' as const }],
-        bounds: { minX: 0, maxX: 0, minY: 0, maxY: 0 },
-      };
-
-      const generated = {
-        pins: [
-          { number: '1', name: 'IN', x: 0, y: 0, rotation: 0, electrical: 'input' as const },
-          { number: '2', name: 'OUT', x: 1, y: 0, rotation: 0, electrical: 'output' as const },
-        ],
-        bounds: { minX: 0, maxX: 1, minY: 0, maxY: 0 },
-      };
-
-      const result = compareSymbols(reference, generated);
-
-      expect(result.passed).toBe(false);
-      expect(result.pinCountMatch).toBe(false);
-    });
-
-    it('detects missing pins', () => {
-      const reference = {
-        pins: [
-          { number: '1', name: 'A', x: 0, y: 0, rotation: 0 },
-          { number: '2', name: 'B', x: 1, y: 0, rotation: 0 },
-        ],
-        bounds: { minX: 0, maxX: 1, minY: 0, maxY: 0 },
-      };
-
-      const generated = {
-        pins: [{ number: '1', name: 'A', x: 0, y: 0, rotation: 0 }],
-        bounds: { minX: 0, maxX: 0, minY: 0, maxY: 0 },
-      };
-
-      const result = compareSymbols(reference, generated);
-
-      expect(result.passed).toBe(false);
-      expect(result.errors.some((e) => e.field === 'missing')).toBe(true);
-    });
-  });
 });

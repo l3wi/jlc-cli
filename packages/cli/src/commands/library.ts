@@ -91,5 +91,6 @@ export async function regenerateCommand(options: RegenerateOptions): Promise<voi
     for (const comp of result.components.filter(c => c.status === 'failed')) {
       console.log(chalk.red(`  • ${comp.name} (${comp.id}): ${comp.error}`));
     }
+    process.exitCode = 1;
   }
 }

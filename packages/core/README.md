@@ -35,7 +35,7 @@ const result = await libraryService.install('C8734', {
 });
 
 console.log(result.symbolRef);    // "JLC-MCP-ICs:STM32F103C8T6"
-console.log(result.footprintRef); // "Package_QFP:LQFP-48_7x7mm_P0.5mm"
+console.log(result.footprintRef); // Library-qualified generated footprint reference
 ```
 
 ## API Reference
@@ -90,12 +90,12 @@ import { createLibraryService } from '@jlcpcb/core';
 const lib = createLibraryService();
 
 // Install component to global library
-const result = await lib.install('C2040', {
+const globalResult = await lib.install('C2040', {
   include3d: true,
 });
 
 // Install to project-local library
-const result = await lib.install('C2040', {
+const projectResult = await lib.install('C2040', {
   projectPath: '/path/to/kicad/project',
   include3d: true,
 });
@@ -105,7 +105,7 @@ const installed = await lib.listInstalled();
 
 // Check library status
 const status = await lib.getStatus();
-// { installed: true, linked: true, kicadVersion: '9.0', path: '...' }
+console.log(status.version, status.paths.symLibTable);
 
 // Initialize/register global library tables
 await lib.ensureGlobalTables();
@@ -116,29 +116,28 @@ await lib.ensureGlobalTables();
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `projectPath` | `string` | - | Project path for local install |
-| `include3d` | `boolean` | `false` | Download 3D model |
+| `include3d` | `boolean` | `true` | Download 3D model when available |
 | `force` | `boolean` | `false` | Regenerate if exists |
 
 **InstallResult:**
 
 ```typescript
-interface InstallResult {
-  symbolRef: string;           // "JLC-MCP-ICs:STM32F103C8T6"
-  footprintRef: string;        // "Package_QFP:LQFP-48..."
-  symbolPath: string;          // Absolute path to .kicad_sym
-  footprintPath?: string;      // Path to .kicad_mod (if custom)
-  modelPath?: string;          // Path to .step (if included)
-  symbolAction: 'created' | 'appended' | 'exists' | 'replaced';
-  footprintType: 'builtin' | 'custom';
-  validationData: {
-    pinCount: number;
-    padCount: number;
-    pinPadCountMatch: boolean;
-    hasPowerPins: boolean;
-    hasGroundPins: boolean;
-  };
-}
+import type { InstallResult } from '@jlcpcb/core';
+
+const result: InstallResult = await lib.install('C2040');
+console.log(result.symbolRef);             // Library-qualified symbol reference
+console.log(result.footprintRef);          // Library-qualified footprint reference
+console.log(result.files.symbolLibrary);  // Absolute .kicad_sym path
+console.log(result.files.footprint);       // Generated .kicad_mod path, if needed
+console.log(result.files.model3d);         // Downloaded model path, if available
+console.log(result.footprintType);         // "reference" or "generated"
+console.log(result.symbolAction);          // "created", "appended", "exists", or "replaced"
+console.log(result.validationData.checks.pin_pad_count_match);
 ```
+
+`listInstalled({ projectPath })` returns the same library-qualified symbol references as installation. Removing a component preserves unrelated symbols and any generated footprint still referenced by another installed symbol.
+
+`getLibraryPaths(projectPath?)` resolves the shared library directories for a project or the detected global KiCad installation. Project-local model references use `${KIPRJMOD}`; global references use the detected version's variable, available through `getKicadThirdPartyVariable(version?)`.
 
 ### API Clients
 
@@ -267,6 +266,12 @@ const exists = symbolConverter.symbolExistsInLibrary(content, 'STM32F103C8T6');
 const name = symbolConverter.getSymbolName(componentData);
 ```
 
+Source-based symbols preserve separate SVG contours, relative/repeated path commands, Bézier curves, elliptical arcs, and unequal ellipses. Flattened curves stay within 0.005 mm after coordinate rounding. Source fills use KiCad outline fill; nested or overlapping filled subpaths fail when their hole/overlap semantics cannot be preserved. Visible Reference/Value properties follow the source pin bounds, including drawings far from the document origin. Standardized passive templates remain intentional transformations, not geometric copies of the source.
+
+`compareSymbols()` validates pin numbers, names, relative connection positions, directions, and declared electrical types. KiCad coordinates are already millimetres; source coordinates use 0.254 mm units. One global translation is ignored, but scaling, rotation, renumbering, and relative movement are not. Position tolerance is capped at 0.05 mm and direction tolerance is 1°. Missing/duplicate identities and unknown metadata fail; an omitted source direction requires an unambiguous straight connection path. Explicit connector pinpart labels such as `J1/T+` resolve names consistently with source parsing.
+
+The result's `coverage` explicitly excludes body graphics, text, pin lengths, and pin styles. `ignorePinNames: true` excludes name comparison and is disclosed in coverage; it does not relax electrical or geometric checks. Standardized passive geometry/electrical changes therefore fail strict source comparison. Live fixtures record exact expected discrepancies for those templates and for incomplete/ambiguous source metadata; those expectations do not turn CLI validation failures into passes.
+
 #### FootprintConverter
 
 ```typescript
@@ -274,17 +279,34 @@ import { footprintConverter } from '@jlcpcb/core';
 
 // Generate KiCad footprint file
 const kicadMod = footprintConverter.convert(componentData, {
-  footprintName: 'LQFP-48_Custom',
-  include3dModel: true,
+  include3DModel: true,
   modelPath: '${KICAD9_3RD_PARTY}/jlc_mcp/3dmodels/...',
 });
 
 // Get footprint (returns reference for built-in or generates custom)
 const result = footprintConverter.getFootprint(componentData);
-// { type: 'builtin', ref: 'Package_QFP:LQFP-48_7x7mm_P0.5mm' }
-// or
-// { type: 'custom', content: '(footprint ...)' }
+// { type: 'reference', reference: 'Resistor_SMD:R_0603_1608Metric', name: 'R_0603_1608Metric' }
+// or, for ICs and other non-interchangeable packages:
+// { type: 'generated', content: '(footprint ...)', name: '...' }
 ```
+
+`convert()` preserves the source land pattern. `getFootprint()` may instead select a **nominal KiCad land pattern** for a recognized, unpolarized two-terminal R/C/L package with compatible pad identities and simple geometry. That substitution is intentional; it is not a claim that the source and standard pad dimensions are identical. ICs, connectors, polarized devices, unusual pads, and footprints with additional manufacturing features are generated.
+
+Generated polygon pads have zero-width filled boundaries, without adding copper around their outlines. Slots retain their explicit diameter, total length, axis, and offset; explicit non-plated pads remain NPTH. Missing drill diameters, ambiguous slot axes, or contradictory slot dimensions cause conversion errors rather than guessed geometry.
+
+Region paths support absolute/relative and repeated SVG commands, including Bézier and elliptical curves. Curves are flattened with a 0.005 mm chord-error bound before coordinate rounding. Courtyards enclose transformed pads, drills, and supported body/graphic geometry with at least 0.25 mm clearance.
+
+Copper-pour cutouts become pour-only rule areas, while physical board cutouts become `Edge.Cuts`. Named-net exclusions and compound regions with nested or overlapping contours are rejected when their semantics cannot be preserved. These checks establish source fidelity, not datasheet compliance or board-level DRC.
+
+Footprint comparison validates copper boundaries, layers, plating, full drill geometry, holes, and vias. Missing manufacturing metadata or unsupported reference geometry fails as unverified. Footprint position tolerance is capped at 0.05 mm and full-dimension tolerance at 0.02 mm; legacy warning-only or permissive tolerance options cannot bypass those checks.
+
+Existing installed symbols and footprints are not rewritten automatically. Regenerate them explicitly to apply the corrected conversion.
+
+#### Browser SVG previews
+
+`renderSymbolSvg()` and `renderFootprintSvg()` render capsule pads/drills, transformed custom copper primitives, rotated drill offsets, roundrect radii, major/minor arcs, visible text/properties, and symbol fill/display metadata. Unsupported footprint primitives/shapes produce an explicit preview error rather than substitute copper.
+
+Text uses browser fonts rather than KiCad stroke-font outlines. Rule areas are annotated outlines/shading, not copper subtraction. Preview rendering and pin comparison are not datasheet verification, ERC, or board-level DRC; inspect the generated files in native KiCad for those checks.
 
 ### Utilities
 
@@ -318,37 +340,25 @@ const categories = categoryRouter.getAllCategories();
 
 **Categories:** Resistors, Capacitors, Inductors, Diodes, Crystals, Transistors, MCUs, Memory, Sensors, Interface, Power, Optocouplers, Connectors, ICs, Misc
 
-#### FootprintMapper
+#### Footprint Mapping
 
-Map package names to KiCad built-in footprints.
+Map complete passive package identities to nominal KiCad library entries. Use `getFootprint()` when selecting a footprint for an actual component: it also checks source geometry and pad identities.
 
 ```typescript
-import { footprintMapper } from '@jlcpcb/core';
+import { mapToKicadFootprint, getKicadFootprintRef, isStandardPassive } from '@jlcpcb/core';
 
-// Map package to KiCad footprint
-const fp = footprintMapper.mapToKicadFootprint('0603');
-// 'Resistor_SMD:R_0603_1608Metric'
+const mapping = mapToKicadFootprint('R0603', 'R?');
+if (mapping) {
+  console.log(getKicadFootprintRef(mapping));
+  // 'Resistor_SMD:R_0603_1608Metric'
+}
 
-const fp2 = footprintMapper.mapToKicadFootprint('SOIC-8');
-// 'Package_SO:SOIC-8_3.9x4.9mm_P1.27mm'
-
-// Check if standard passive
-const isStandard = footprintMapper.isStandardPassive('0805');
-// true
-
-// Get reference with category context
-const ref = footprintMapper.getKicadFootprintRef('SOT-23', 'Transistors');
-// 'Package_TO_SOT_SMD:SOT-23'
+isStandardPassive('C_0402_1005Metric', 'C?'); // true
+mapToKicadFootprint('SOIC-8', 'U?');          // null: generate from source
+mapToKicadFootprint('LED0805-RD', 'D?');      // null: not a chip-passive identity
 ```
 
-**Supported Packages:**
-- SMD sizes: 0201, 0402, 0603, 0805, 1206, 1210, 1812, 2010, 2512
-- SOIC: 8, 14, 16, 16W, 20, 24, 28-pin
-- TSSOP: 8, 14, 16, 20, 24, 28-pin
-- SOT: SOT-23, SOT-89, SOT-223
-- SOD: SOD-123, SOD-123F
-- QFP/LQFP: 32, 48, 64, 100-pin
-- BGA: Various pitch/ball counts
+Supported imperial sizes are 0201, 0402, 0603, 0805, 1206, 1210, and 1812 for R/C/L, plus 2010 and 2512 for R/L. Optional metric dimensions must agree with the imperial size. A trailing `?` in a component prefix is accepted; arbitrary size substrings and polarized-device descriptions are not.
 
 #### ValueNormalizer
 
