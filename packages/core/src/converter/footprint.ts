@@ -74,6 +74,10 @@ const KI_PAD_SHAPE: Record<string, string> = {
   POLYGON: 'custom',
 };
 
+// EasyEDA graphics layers with no KiCad counterpart: 0 = unassigned (JLC library
+// tooling puts package body outlines here), 99/100/101 = editor doc helpers.
+const INTERNAL_LAYER_IDS = [0, 99, 100, 101];
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -545,9 +549,9 @@ export class FootprintConverter {
   }
 
   private canSubstituteStandard(footprint: EasyEDAComponentData['footprint']): boolean {
-    const benignLayer = (layer: number) => [3, 4, 12, 13, 14, 15, 99, 100, 101].includes(layer);
+    const benignLayer = (layer: number) => [0, 3, 4, 12, 13, 14, 15, 99, 100, 101].includes(layer);
     if (footprint.holes.length || footprint.vias.length ||
-      footprint.solidRegions.some((region) => ![99, 100, 101].includes(region.layerId)) ||
+      footprint.solidRegions.some((region) => !INTERNAL_LAYER_IDS.includes(region.layerId)) ||
       [...footprint.tracks, ...footprint.circles, ...footprint.arcs, ...footprint.rects, ...footprint.texts].some((item) => !benignLayer(item.layerId))) return false;
     const [a, b] = footprint.pads;
     if (!a || !b || footprint.pads.some((pad) =>
@@ -607,7 +611,7 @@ export class FootprintConverter {
    * Generate TRACK as fp_line segments
    */
   private generateTrack(track: EasyEDATrack, origin: Point): string {
-    if ([99, 100, 101].includes(track.layerId)) return '';
+    if (INTERNAL_LAYER_IDS.includes(track.layerId)) return '';
     return this.generateLines(parsePoints(track.points), track.strokeWidth, track.layerId, origin);
   }
 
@@ -643,7 +647,7 @@ export class FootprintConverter {
    * Generate CIRCLE as fp_circle
    */
   private generateCircle(circle: EasyEDACircle, origin: Point): string {
-    if ([99, 100, 101].includes(circle.layerId)) return '';
+    if (INTERNAL_LAYER_IDS.includes(circle.layerId)) return '';
     const cx = convertX(circle.cx, origin.x);
     const cy = convertY(circle.cy, origin.y);
     const r = roundTo(toMM(circle.radius), 4);
@@ -668,7 +672,7 @@ export class FootprintConverter {
    * Generate circular SVG arcs as fp_arc and tessellate elliptical arcs as fp_line.
    */
   private generateArc(arc: EasyEDAArc, origin: Point): string {
-    if ([99, 100, 101].includes(arc.layerId)) return '';
+    if (INTERNAL_LAYER_IDS.includes(arc.layerId)) return '';
     const numericTokens = arc.path.match(/[-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?/g);
     const params = /^\s*M[\s\d.,+-]*A[\s\d.,+-]*\s*$/.test(arc.path) && numericTokens?.length === 9
       ? parseSvgArcPath(arc.path) : null;
@@ -728,7 +732,7 @@ export class FootprintConverter {
    * Generate RECT as 4 fp_line elements
    */
   private generateRect(rect: EasyEDARect, origin: Point): string {
-    if ([99, 100, 101].includes(rect.layerId)) return '';
+    if (INTERNAL_LAYER_IDS.includes(rect.layerId)) return '';
     const layer = getLayer(rect.layerId);
     const strokeWidth = roundTo(toMM(rect.strokeWidth), 4);
 
@@ -765,7 +769,7 @@ export class FootprintConverter {
    * Generate TEXT as fp_text (user text, not REF/VAL)
    */
   private generateText(text: EasyEDAText, origin: Point): string {
-    if ([99, 100, 101].includes(text.layerId)) return '';
+    if (INTERNAL_LAYER_IDS.includes(text.layerId)) return '';
     finite(text.centerX, `text "${text.id}" X`); finite(text.centerY, `text "${text.id}" Y`);
     positive(text.fontSize, `text "${text.id}" font size`); finite(text.rotation, `text "${text.id}" rotation`);
     // Skip if not displayed or is reference/value placeholder
@@ -833,7 +837,7 @@ ${justify ? `\t\t\t(justify ${justify})\n` : ''}\t\t)
   }
 
   private generateSolidRegion(region: EasyEDASolidRegion, subpaths: SvgSubpath[], origin: Point): string {
-    if ([99, 100, 101].includes(region.layerId)) return '';
+    if (INTERNAL_LAYER_IDS.includes(region.layerId)) return '';
     const cutout = region.fillType === 'cutout' || region.fillType === 'none';
     if (cutout && ![1, 2, 11].includes(region.layerId)) {
       throw new Error(`Cannot convert cutout "${region.id}": requires a copper layer`);
