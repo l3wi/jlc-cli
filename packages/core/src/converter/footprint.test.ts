@@ -550,4 +550,19 @@ describe('FootprintConverter', () => {
     component.footprint.pads[1].points = '2 -1.5 4 -1.5 4 3 2 1.5';
     expect(footprintConverter.getFootprint(component).type).toBe('generated');
   });
+
+  it('skips unassigned EasyEDA layer 0 graphics but keeps them in the courtyard', () => {
+    // JLC library tooling draws package body outlines on layer 0 (e.g. TFBGA-265 C114407)
+    const component = createComponent(['1', '2']);
+    component.footprint.rects.push({ x: -20, y: -2, width: 2, height: 4, strokeWidth: 2, layerId: 0, id: 'body', isLocked: false });
+    component.footprint.tracks.push({ strokeWidth: 1, layerId: 0, net: '', points: '0 0 10 0', id: 'doc', isLocked: false });
+    const output = footprintConverter.convert(component);
+    const lines = findChildren(parseSExpr(output), 'fp_line');
+    expect(lines).toHaveLength(4); // courtyard only; no layer-0 graphics converted
+    expect(lines.every((line) => getAttr(line, 'layer') === 'F.CrtYd')).toBe(true);
+    const bounds = courtyardBounds(output);
+    expect(bounds.minX).toBeLessThanOrEqual(-21 * 0.254);
+    expect(bounds.maxX).toBeGreaterThanOrEqual(10.5 * 0.254);
+    expect(footprintConverter.getFootprint(component).type).toBe('reference');
+  });
 });
