@@ -38,11 +38,24 @@ export async function searchCommand(query: string, options: SearchCommandOptions
           query,
           count: 0,
           results: [],
+          ...(options.economicOnly
+            ? {
+                hint: '--economic-only excludes parts JLC marks "Standard Only". Only the first 50 matches were checked; retry without the flag to see them.',
+              }
+            : {}),
         });
         return;
       }
 
-      console.log('No components found. Try a different search term.');
+      console.log(
+        'No components found. Try a different search term.'
+      );
+      if (options.economicOnly) {
+        console.log(
+          '--economic-only drops "Standard Only" parts (they force the pricier Standard PCBA service). ' +
+            'Only the first 50 matches were checked - retry without the flag to see them.'
+        );
+      }
       return;
     }
 

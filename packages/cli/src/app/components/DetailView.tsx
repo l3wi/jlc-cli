@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { InstalledComponent } from '@jlcpcb/core';
+import type { InstalledComponent, PcbaType } from '@jlcpcb/core';
 import { Divider } from './Divider.js';
 
 // Flexible component type that accepts both ComponentSearchResult and ComponentDetails
@@ -12,6 +12,7 @@ export interface DetailViewComponent {
   stock?: number;
   price?: number;
   libraryType?: 'basic' | 'extended';
+  pcbaType?: PcbaType;
   description?: string;
   datasheetPdf?: string;
   datasheet?: string; // ComponentDetails uses this instead of datasheetPdf
@@ -86,6 +87,21 @@ export function DetailView({ component, terminalWidth, isInstalled, canInstall =
           <Text color={component.libraryType === 'basic' ? 'green' : 'yellow'}>
             {component.libraryType === 'basic' ? 'Basic' : 'Extended'}
           </Text>
+        </Box>
+        <Box>
+          <Text dimColor>{'PCBA Type'.padEnd(labelWidth)}</Text>
+          {component.pcbaType ? (
+            <Text color={component.pcbaType === 'standard-only' ? 'yellow' : 'green'}>
+              {truncate(
+                component.pcbaType === 'standard-only'
+                  ? 'Standard Only - no Economic PCBA'
+                  : 'Economic and Standard',
+                valueWidth
+              )}
+            </Text>
+          ) : (
+            <Text dimColor>{'N/A'}</Text>
+          )}
         </Box>
       </Box>
     </Box>

@@ -4,6 +4,7 @@
  */
 
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { errorPayloadFromUnknown, toolError } from '../tool-response.js';
 
 // Import tools
 import { componentSearchTool, handleComponentSearch } from './search.js';
@@ -48,6 +49,20 @@ export const toolHandlers: Record<string, (args: unknown) => Promise<{
   [updateLibraryTool.name]: handleUpdateLibrary,
   [fixLibraryTool.name]: handleFixLibrary,
 };
+
+export async function dispatchToolCall(name: string, args?: unknown) {
+  const handler = Object.hasOwn(toolHandlers, name) ? toolHandlers[name] : undefined;
+  if (!handler) return toolError('unknown_tool', `Unknown tool: ${name}`);
+  try {
+    return await handler(args === undefined ? {} : args);
+  } catch (error) {
+    const payload = errorPayloadFromUnknown(error);
+    return toolError(payload.code, payload.message, {
+      retryable: payload.retryable,
+      details: payload.details,
+    });
+  }
+}
 
 // Re-export for direct imports
 export { componentSearchTool, handleComponentSearch } from './search.js';

@@ -1,9 +1,18 @@
 # @jlcpcb/core
 
-## Unreleased
+## 0.5.0
+
+### Minor Changes
+
+- Add JLCPCB catalogue browsing and attribute filtering to the core service: `getComponentTypes()` (typed
+  component-type tree), `getFilterAttributes()` (per-type vocabulary, counts, brands, packages), catalogue
+  filters on search (`typeIds`, `attributeFilters`, `brands`, `packages`), `searchPage()` with the API row
+  count for pagination, and `resolveAttributeQuery()` to turn bounds such as "Output Current >= 1A" into the
+  exact facet values the API accepts using its own unit metadata.
 
 ### Patch Changes
 
+- Report JLCPCB PCBA service compatibility from `componentProductType` as `pcbaType` on search results, exposing "Standard Only" parts that cannot use Economic PCBA; add `economicOnly` to search options to exclude them.
 - Correct browser capsule/custom-pad geometry, rotation and drill offsets, roundrect radii, arc sweeps/bounds, visible annotations, and rule-area display.
 - Preserve complete symbol paths, unequal ellipses, separate contours, and source fills; position visible properties with source geometry and reject unrepresentable compound fills.
 - Repair symbol pin validation units, direction conventions, identities, names, and electrical semantics; reject unknown evidence and disclose unvalidated graphics scope.

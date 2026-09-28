@@ -19,9 +19,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { tools, toolHandlers } from './tools/index.js';
-import { errorPayloadFromUnknown, toolError } from './tool-response.js';
-import { createLogger, ensureGlobalLibraryTables, startHttpServer } from '@jlcpcb/core';
+import { tools, dispatchToolCall } from './tools/index.js';
+import { createLogger, ensureGlobalLibraryTables, startHttpServer, stopHttpServer } from '@jlcpcb/core';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json');
@@ -53,29 +52,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   logger.debug(`Tool call: ${name}`, args);
 
-  const handler = toolHandlers[name];
-
-  if (!handler) {
-    return toolError('unknown_tool', `Unknown tool: ${name}`);
-  }
-
-  try {
-    return await handler(args);
-  } catch (error) {
-    logger.error(`Tool error: ${name}`, error);
-    const structuredError = errorPayloadFromUnknown(error);
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: false,
-          error: structuredError,
-        }),
-      }],
-      isError: true,
-    };
-  }
+  return dispatchToolCall(name, args);
 });
+
+let shutdownPromise: Promise<void> | undefined;
+function shutdown(): Promise<void> {
+  if (!shutdownPromise) {
+    shutdownPromise = Promise.resolve().then(async () => {
+      stopHttpServer();
+      await server.close();
+    });
+  }
+  return shutdownPromise;
+}
+
+function handleShutdown() {
+  void shutdown().catch((error) => {
+    logger.error('Shutdown error', error);
+    process.exitCode = 1;
+  });
+}
+
+function handleTransportError(error: Error) {
+  logger.error('Transport error', error);
+  process.exitCode = 1;
+  handleShutdown();
+}
+
+// The stdio transport does not observe EOF itself. Close the HTTP listener as well
+// so a disconnected client cannot leave an orphaned MCP process behind.
+process.stdin.once('end', handleShutdown);
+process.stdin.once('close', handleShutdown);
+process.stdin.once('error', handleTransportError);
+process.stdout.once('error', handleTransportError);
+process.once('SIGINT', handleShutdown);
+process.once('SIGTERM', handleShutdown);
+server.onclose = handleShutdown;
 
 // Run the server
 async function main() {
@@ -86,7 +98,7 @@ async function main() {
     logger.error('Failed to register JLC libraries in KiCad global tables', {
       errors: registration.errors,
     });
-    process.exit(1);
+    throw new Error('Failed to register JLC libraries');
   }
 
   // Log registration summary
@@ -107,6 +119,11 @@ async function main() {
     });
   }
 
+  if (shutdownPromise || process.stdin.readableEnded || process.stdin.destroyed) {
+    await shutdown();
+    return;
+  }
+
   // Start HTTP server for the component browser UI
   const httpPort = startHttpServer();
   logger.info(`Component browser available at http://localhost:${httpPort}`);
@@ -116,7 +133,10 @@ async function main() {
   logger.info('JLC MCP server running on stdio');
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   logger.error('Server error', error);
-  process.exit(1);
+  process.exitCode = 1;
+  await shutdown().catch((shutdownError) => {
+    logger.error('Shutdown error', shutdownError);
+  });
 });

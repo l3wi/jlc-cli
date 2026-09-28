@@ -78,7 +78,58 @@ const communityComponent = await service.fetchCommunity('uuid-here');
 | `limit` | `number` | `20` | Maximum results |
 | `inStock` | `boolean` | `false` | Only in-stock parts |
 | `basicOnly` | `boolean` | `false` | Only JLCPCB basic parts |
+| `economicOnly` | `boolean` | `false` | Only parts supported by Economic PCBA (excludes "Standard Only" parts) |
+| `typeIds` | `number[]` | — | Restrict to JLCPCB component types (ids from `getComponentTypes`) |
+| `attributeFilters` | `AttributeFilterGroup[]` | — | Attribute values, e.g. `[{ 'Output Current': ['1A'] }]`; values OR inside an attribute, each group ANDs |
+| `brands` | `string[]` | — | Exact manufacturer names from `getFilterAttributes().brands` |
+| `packages` | `string[]` | — | Exact package names from `getFilterAttributes().packages` |
 | `source` | `string` | `'lcsc'` | Search source |
+
+#### Catalogue browsing and attribute filters
+
+JLCPCB's parts API is type-scoped: a component type has its own attribute vocabulary, and searching can be
+driven by those values instead of free text. Attributes are only filterable by exact vocabulary strings —
+which is what `resolveAttributeQuery` produces from a value constraint, using the API's own unit metadata.
+
+```typescript
+import { createComponentService, resolveAttributeQuery } from '@jlcpcb/core';
+
+const service = createComponentService();
+
+// 1. Types (two levels): grade 1 = category, grade 2 = leaf. `id` is what filters consume.
+const types = await service.getComponentTypes();
+const ldo = types.find(t => t.grade === 2 && t.name.includes('Low Drop Out')); // id 2956, 63730 parts
+
+// 2. Vocabulary, counts, brands and packages for that type ([] = whole catalogue)
+const facets = await service.getFilterAttributes([ldo!.id]);
+const current = facets.attributes.find(a => a.name === 'Output Current')!;
+// current: { kind: 'range', unit: 'A', unitConversionMap: { fA…kA }, values: [{ value: '1A', docCount: 5125, numbers: [1] }, …] }
+// facets.counts: { economic: 63395, standard: 63730, … } — the difference needs the pricier Standard PCBA
+
+// 3. Turn "can do 1A" into the exact values the API accepts (ranges, multi-values and units handled)
+const amps = resolveAttributeQuery(current, { attribute: 'Output Current', min: 1, unit: 'A' });
+// amps.values: 50 buckets incl. '1A', '500mA、1A', '1A、2A'; amps.predictedTotal: 10168
+
+// 4. Filter: empty query is fine when the type and attributes scope the result set
+const page = await service.searchPage('', {
+  typeIds: [ldo!.id],
+  attributeFilters: [{ 'Output Current': amps.values }, { 'Output Type': ['Adjustable'] }],
+  limit: 20,
+});
+// page.total === 2007 (equals the sum of the matched facet docCounts), page.results[].attributes carry the values
+```
+
+Notes:
+
+- `predictedTotal` from a resolution equals the `searchPage().total` the filter yields (facet buckets are
+  disjoint), so a UI can preview counts before querying.
+- Attribute values are case- and unit-sensitive (`1000mA` matches nothing); pass `values` for exact
+  vocabulary entries or `min`/`max` to translate bounds. `min` means "the part can reach at least",
+  `max` "at least as low" (use `max` for negative requirements such as "operates down to -40℃").
+- `searchPage` returns `total` for pagination; `search` is the list-only convenience over it.
+- Payload sizes: catalogue ~320 KB, facets multi-MB for a large type, so fetch facets per type and cache
+  them (`componentCount` drifts, ids do not).
+- `typeIds: []` on `getFilterAttributes` means the whole catalogue (7.2M parts, 3600+ brands).
 
 #### LibraryService
 

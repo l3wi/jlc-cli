@@ -3,7 +3,15 @@
  * High-level API for searching and fetching components
  */
 
-import type { ComponentSearchResult, EasyEDAComponentData, EasyEDACommunityComponent } from '../types/index.js';
+import type {
+  AttributeFilterGroup,
+  ComponentFilterAttributes,
+  ComponentSearchPage,
+  ComponentSearchResult,
+  JlcComponentType,
+  EasyEDAComponentData,
+  EasyEDACommunityComponent,
+} from '../types/index.js';
 import { jlcClient } from '../api/jlc.js';
 import { easyedaClient } from '../api/easyeda.js';
 import { easyedaCommunityClient } from '../api/easyeda-community.js';
@@ -12,6 +20,19 @@ export interface SearchOptions {
   limit?: number;
   inStock?: boolean;
   basicOnly?: boolean;
+  /** Only return parts supported by the Economic PCBA service (excludes "Standard Only" parts) */
+  economicOnly?: boolean;
+  /** Restrict to JLCPCB component types (grade-2 ids from `getComponentTypes`; [] = whole catalogue) */
+  typeIds?: number[];
+  /**
+   * Attribute filters, from `getFilterAttributes` vocabulary. Each group is `{ attribute: [values] }`:
+   * values OR together, groups AND together.
+   */
+  attributeFilters?: AttributeFilterGroup[];
+  /** Exact manufacturer names from ComponentFilterAttributes.brands */
+  brands?: string[];
+  /** Exact package names from ComponentFilterAttributes.packages */
+  packages?: string[];
   source?: 'lcsc' | 'community' | 'easyeda-community' | 'all';
 }
 
@@ -30,6 +51,15 @@ export interface ComponentDetails {
 
 export interface ComponentService {
   search(query: string, options?: SearchOptions): Promise<ComponentSearchResult[]>;
+  /** One page of results plus the API's row count, for faceted browsing and pagination */
+  searchPage(query: string, options?: SearchOptions): Promise<ComponentSearchPage>;
+  /** Component-type catalogue (two levels); ids feed `SearchOptions.typeIds` and `getFilterAttributes` */
+  getComponentTypes(): Promise<JlcComponentType[]>;
+  /** Filter vocabulary, counts, brands and packages for one or more types ([] = whole catalogue) */
+  getFilterAttributes(
+    typeIds: number[],
+    options?: Pick<SearchOptions, 'brands' | 'packages'>
+  ): Promise<ComponentFilterAttributes>;
   fetch(id: string): Promise<EasyEDAComponentData | null>;
   fetchCommunity(uuid: string): Promise<EasyEDACommunityComponent | null>;
   getDetails(lcscId: string): Promise<ComponentDetails>;
@@ -42,53 +72,85 @@ function isLcscId(id: string): boolean {
   return /^C\d+$/.test(id);
 }
 
+/**
+ * Map service options onto the JLC client's options. Community results carry no JLCPCB catalogue fields,
+ * so the catalogue filters are LCSC-only.
+ */
+function buildJlcOptions(options: SearchOptions) {
+  const {
+    limit = 20,
+    inStock,
+    basicOnly,
+    economicOnly,
+    typeIds,
+    attributeFilters,
+    brands,
+    packages,
+  } = options;
+
+  return { limit, inStock, basicOnly, economicOnly, typeIds, attributeFilters, brands, packages };
+}
+
 export function createComponentService(): ComponentService {
+  const searchCommunity = async (
+    query: string,
+    limit: number
+  ): Promise<ComponentSearchResult[]> => {
+    const results = await easyedaCommunityClient.search({ query, limit });
+    return results.map(r => ({
+      id: r.uuid,
+      idType: 'easyeda_uuid' as const,
+      easyedaUuid: r.uuid,
+      name: r.title,
+      manufacturer: r.owner?.nickname || 'Community',
+      description: r.description || '',
+      package: r.package || '',
+      stock: 0,
+    }));
+  };
+
+  const search = async (
+    query: string,
+    options: SearchOptions = {}
+  ): Promise<ComponentSearchResult[]> => {
+    const { source = 'lcsc', limit = 20 } = options;
+
+    if (source === 'lcsc') {
+      return jlcClient.search(query, buildJlcOptions(options));
+    }
+
+    if (source === 'all') {
+      const [lcscResults, communityResults] = await Promise.all([
+        jlcClient.search(query, buildJlcOptions(options)),
+        searchCommunity(query, limit),
+      ]);
+      return [...lcscResults, ...communityResults].slice(0, limit);
+    }
+
+    return searchCommunity(query, limit);
+  };
+
   return {
-    async search(query: string, options: SearchOptions = {}): Promise<ComponentSearchResult[]> {
-      const { source = 'lcsc', limit = 20, inStock, basicOnly } = options;
+    search,
 
-      if (source === 'all') {
-        const [lcscResults, communityResults] = await Promise.all([
-          jlcClient.search(query, { limit, inStock, basicOnly }),
-          easyedaCommunityClient.search({
-            query,
-            limit,
-          }),
-        ]);
-
-        return [
-          ...lcscResults,
-          ...communityResults.map(r => ({
-            id: r.uuid,
-            idType: 'easyeda_uuid' as const,
-            easyedaUuid: r.uuid,
-            name: r.title,
-            manufacturer: r.owner?.nickname || 'Community',
-            description: r.description || '',
-            package: r.package || '',
-            stock: 0,
-          })),
-        ].slice(0, limit);
+    async searchPage(query: string, options: SearchOptions = {}): Promise<ComponentSearchPage> {
+      if ((options.source ?? 'lcsc') !== 'lcsc') {
+        // Community results come from a different API with no row count of its own
+        const results = await search(query, options);
+        return { total: results.length, results, page: 1, pageSize: results.length };
       }
+      return jlcClient.searchPage(query, buildJlcOptions(options));
+    },
 
-      if (source === 'community' || source === 'easyeda-community') {
-        const results = await easyedaCommunityClient.search({
-          query,
-          limit,
-        });
-        return results.map(r => ({
-          id: r.uuid,
-          idType: 'easyeda_uuid' as const,
-          easyedaUuid: r.uuid,
-          name: r.title,
-          manufacturer: r.owner?.nickname || 'Community',
-          description: r.description || '',
-          package: r.package || '',
-          stock: 0,
-        }));
-      }
+    async getComponentTypes(): Promise<JlcComponentType[]> {
+      return jlcClient.getComponentTypes();
+    },
 
-      return jlcClient.search(query, { limit, inStock, basicOnly });
+    async getFilterAttributes(
+      typeIds: number[],
+      options: Pick<SearchOptions, 'brands' | 'packages'> = {}
+    ): Promise<ComponentFilterAttributes> {
+      return jlcClient.getFilterAttributes(typeIds, options);
     },
 
     async fetch(id: string): Promise<EasyEDAComponentData | null> {

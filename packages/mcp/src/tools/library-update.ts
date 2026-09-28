@@ -6,78 +6,35 @@
 
 import { z } from 'zod';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { existsSync, readdirSync } from 'fs';
-import { readFile } from 'fs/promises';
-import { homedir, platform } from 'os';
+import { readFile, rename, rm } from 'fs/promises';
+import { randomUUID } from 'crypto';
 import {
   easyedaClient,
-  symbolConverter,
   footprintConverter,
   getLibraryCategory,
   getLibraryFilename,
-  getFootprintDirName,
-  get3DModelsDirName,
+  getLibraryPaths,
+  getCategoryFootprintReference,
   getAllCategories,
   type LibraryCategory,
   ensureDir,
   writeText,
-  detectKicadVersion,
 } from '@jlcpcb/core';
 import { join } from 'path';
 import { jsonContent, toolError } from '../tool-response.js';
+import { findJlcLibraries, readLibrarySymbols, regenerateInstalledSymbol, type LibrarySymbol } from './library-symbols.js';
 
-// 3rd party library namespace
-const LIBRARY_NAMESPACE = 'jlc_mcp';
 
-/**
- * Get library paths for update operation
- * Platform-specific paths matching where ${KICAD9_3RD_PARTY} resolves:
- * - macOS/Windows: ~/Documents/KiCad/{version}/3rdparty/jlc_mcp/
- * - Linux: ~/.local/share/kicad/{version}/3rdparty/jlc_mcp/
- */
-function getLibraryPaths(projectPath?: string): {
-  symbolsDir: string;
-  footprintDir: string;
-  models3dDir: string;
-} {
-  if (projectPath) {
-    const librariesDir = join(projectPath, 'libraries');
-    return {
-      symbolsDir: join(librariesDir, 'symbols'),
-      footprintDir: join(librariesDir, 'footprints', getFootprintDirName()),
-      models3dDir: join(librariesDir, '3dmodels', get3DModelsDirName()),
-    };
+
+/** Never truncate the installed library if writing the refreshed content fails. */
+async function writeAtomic(path: string, content: string): Promise<void> {
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeText(temporaryPath, content);
+    await rename(temporaryPath, path);
+  } finally {
+    await rm(temporaryPath, { force: true });
   }
-
-  const home = homedir();
-  const version = detectKicadVersion();
-  const plat = platform();
-
-  let base: string;
-  if (plat === 'linux') {
-    base = join(home, '.local', 'share', 'kicad', version, '3rdparty', LIBRARY_NAMESPACE);
-  } else {
-    base = join(home, 'Documents', 'KiCad', version, '3rdparty', LIBRARY_NAMESPACE);
-  }
-
-  return {
-    symbolsDir: join(base, 'symbols'),
-    footprintDir: join(base, 'footprints', getFootprintDirName()),
-    models3dDir: join(base, '3dmodels', get3DModelsDirName()),
-  };
-}
-
-/**
- * Extract LCSC IDs from a symbol library file
- */
-function extractLcscIdsFromLibrary(content: string): string[] {
-  const pattern = /\(property\s+"LCSC"\s+"(C\d+)"/g;
-  const ids: string[] = [];
-  let match;
-  while ((match = pattern.exec(content)) !== null) {
-    ids.push(match[1]);
-  }
-  return ids;
 }
 
 /**
@@ -91,23 +48,6 @@ function generateEmptyLibrary(): string {
 )\n`;
 }
 
-/**
- * Find all JLC-MCP-*.kicad_sym files in a directory
- */
-function findJlcLibraries(symbolsDir: string): string[] {
-  if (!existsSync(symbolsDir)) {
-    return [];
-  }
-
-  try {
-    const files = readdirSync(symbolsDir);
-    return files
-      .filter((f) => f.startsWith('JLC-MCP-') && f.endsWith('.kicad_sym'))
-      .map((f) => join(symbolsDir, f));
-  } catch {
-    return [];
-  }
-}
 
 export const updateLibraryTool: Tool = {
   name: 'library_update',
@@ -125,7 +65,7 @@ When libraries exist, this tool:
 3. Fetches fresh data from EasyEDA for each component
 4. Regenerates symbols with value normalization
 5. Applies hybrid footprint logic (KiCad standard vs generated)
-6. Rebuilds category-based libraries
+6. Replaces refreshed symbols in place, preserving failed and unrelated entries
 
 Use dry_run=true to preview changes without writing files.`,
   inputSchema: {
@@ -182,7 +122,7 @@ export async function handleUpdateLibrary(args: unknown) {
               directories_to_create: [
                 paths.symbolsDir,
                 paths.footprintDir,
-                paths.models3dDir,
+                paths.models3dFullDir,
               ],
             },
             libraries_to_create: allCategories.map((cat) => ({
@@ -198,7 +138,7 @@ export async function handleUpdateLibrary(args: unknown) {
     // Create directories
     await ensureDir(paths.symbolsDir);
     await ensureDir(paths.footprintDir);
-    await ensureDir(paths.models3dDir);
+    await ensureDir(paths.models3dFullDir);
 
     // Create empty library files for all categories
     const emptyContent = generateEmptyLibrary();
@@ -223,7 +163,7 @@ export async function handleUpdateLibrary(args: unknown) {
             directories_created: [
               paths.symbolsDir,
               paths.footprintDir,
-              paths.models3dDir,
+              paths.models3dFullDir,
             ],
           },
           libraries_created: createdLibraries,
@@ -236,81 +176,62 @@ export async function handleUpdateLibrary(args: unknown) {
     };
   }
 
-  // Extract all LCSC IDs from existing libraries
-  const allLcscIds: Set<string> = new Set();
-  const libraryInfo: { file: string; ids: string[] }[] = [];
+  const symbolsById = new Map<string, LibrarySymbol[]>();
+  const libraryInfo: { file: string; content: string; symbols: LibrarySymbol[] }[] = [];
 
   for (const file of libraryFiles) {
     const content = await readFile(file, 'utf-8');
-    const ids = extractLcscIdsFromLibrary(content);
-    libraryInfo.push({ file, ids });
-    ids.forEach((id) => allLcscIds.add(id));
+    const symbols = readLibrarySymbols(content);
+    libraryInfo.push({ file, content, symbols });
+    for (const symbol of symbols) {
+      if (!symbol.lcscId) continue;
+      const entries = symbolsById.get(symbol.lcscId);
+      if (entries) entries.push(symbol);
+      else symbolsById.set(symbol.lcscId, [symbol]);
+    }
   }
 
-  if (allLcscIds.size === 0) {
+  if (symbolsById.size === 0) {
     return toolError('no_lcsc_ids_found', 'No LCSC IDs found in existing libraries', {
       details: { libraries_scanned: libraryFiles.length },
     });
   }
 
-  // Process each component
   const results: UpdateResult[] = [];
-  const categorySymbols: Map<LibraryCategory, string[]> = new Map();
+  const refreshed = new Map<LibrarySymbol, string>();
 
-  for (const lcscId of allLcscIds) {
+  for (const [lcscId, symbols] of symbolsById) {
     try {
-      // Fetch fresh component data
       const component = await easyedaClient.getComponentData(lcscId);
+      if (!component) throw new Error('Component not found');
 
-      if (!component) {
-        results.push({
-          lcscId,
-          category: 'Misc',
-          symbolName: '',
-          footprintType: 'generated',
-          footprintRef: '',
-          status: 'failed',
-          error: 'Component not found',
-        });
-        continue;
-      }
-
-      // Determine category
       const category = getLibraryCategory(
         component.info.prefix,
         component.info.category,
         component.info.description
       );
+      // Resolve the exact registered reference before generating any symbol.
+      const footprint = footprintConverter.getFootprint(component);
+      const footprintRef = footprint.type === 'reference'
+        ? footprint.reference!
+        : getCategoryFootprintReference(footprint.name);
+      component.info.package = footprintRef;
 
-      // Generate symbol entry (without library wrapper)
-      const symbolEntry = symbolConverter.convertToSymbolEntry(component);
-      const symbolName = symbolConverter.getSymbolName(component);
-
-      // Collect symbols by category
-      if (!categorySymbols.has(category)) {
-        categorySymbols.set(category, []);
+      const replacements = new Map<LibrarySymbol, string>();
+      for (const symbol of symbols) {
+        replacements.set(symbol, regenerateInstalledSymbol(component, symbol));
       }
-      categorySymbols.get(category)!.push(symbolEntry);
-
-      // Handle footprint
-      const footprintResult = footprintConverter.getFootprint(component);
-
-      // Generate custom footprint if needed (not in dry run)
-      if (!params.dry_run && footprintResult.type === 'generated') {
+      if (!params.dry_run && footprint.type === 'generated') {
         await ensureDir(paths.footprintDir);
-        const footprintName = footprintResult.name + '_' + lcscId;
-        const footprintPath = join(paths.footprintDir, `${footprintName}.kicad_mod`);
-        await writeText(footprintPath, footprintResult.content!);
+        await writeAtomic(join(paths.footprintDir, `${footprint.name}.kicad_mod`), footprint.content!);
       }
-
+      for (const [symbol, entry] of replacements) refreshed.set(symbol, entry);
       results.push({
         lcscId,
         category,
-        symbolName,
-        footprintType: footprintResult.type,
-        footprintRef: footprintResult.type === 'reference'
-          ? footprintResult.reference!
-          : `JLC:${footprintResult.name}_${lcscId}`,
+        symbolName: symbols[0].name,
+        footprintType: footprint.type,
+        footprintRef,
         status: 'updated',
       });
     } catch (error) {
@@ -326,22 +247,29 @@ export async function handleUpdateLibrary(args: unknown) {
     }
   }
 
-  // Write category-based libraries (not in dry run)
-  if (!params.dry_run) {
-    await ensureDir(paths.symbolsDir);
-
-    for (const [category, entries] of categorySymbols) {
-      const filename = getLibraryFilename(category);
-      const filepath = join(paths.symbolsDir, filename);
-
-      // Create library file with all symbols
-      const header = `(kicad_symbol_lib
-\t(version 20241209)
-\t(generator "jlc-mcp")
-\t(generator_version "9.0")
-`;
-      const content = header + entries.join('') + ')\n';
-      await writeText(filepath, content);
+  for (const library of libraryInfo) {
+    const changedIds = new Set<string>();
+    const parts: string[] = [];
+    let offset = 0;
+    for (const symbol of library.symbols) {
+      const entry = refreshed.get(symbol);
+      if (entry === undefined) continue;
+      parts.push(library.content.slice(offset, symbol.start));
+      parts.push(entry);
+      offset = symbol.end;
+      changedIds.add(symbol.lcscId!);
+    }
+    if (changedIds.size === 0 || params.dry_run) continue;
+    parts.push(library.content.slice(offset));
+    try {
+      await writeAtomic(library.file, parts.join(''));
+    } catch (error) {
+      for (const result of results) {
+        if (changedIds.has(result.lcscId)) {
+          result.status = 'failed';
+          result.error = `Could not write ${library.file}: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }
     }
   }
 
@@ -359,8 +287,6 @@ export async function handleUpdateLibrary(args: unknown) {
     custom_generated: successful.filter((r) => r.footprintType === 'generated').length,
   };
 
-  // Compact response - summary only, no detailed failures
-  // (failures can be retrieved separately if needed)
   return {
     content: jsonContent({
         success: failed.length === 0,
@@ -368,7 +294,7 @@ export async function handleUpdateLibrary(args: unknown) {
         status: failed.length === 0 ? 'success' : successful.length === 0 ? 'failed' : 'partial_success',
         dry_run: params.dry_run,
         summary: {
-          total: allLcscIds.size,
+          total: symbolsById.size,
           updated: successful.length,
           failed: failed.length,
         },

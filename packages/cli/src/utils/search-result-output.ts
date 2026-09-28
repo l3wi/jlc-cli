@@ -14,6 +14,7 @@ export function formatSearchResultForJson(result: ComponentSearchResult) {
     stock: result.stock,
     price: result.price,
     library_type: result.libraryType,
+    pcba_type: result.pcbaType,
     category: result.category,
     attributes: result.attributes,
   };

@@ -6,6 +6,7 @@ import {
   formatListHeader,
   formatListRow,
   getListViewColumnWidths,
+  type ListViewRow,
 } from './list-view-format.js';
 import { measureTextWidth } from './table-text.js';
 
@@ -24,6 +25,7 @@ function createResult(
     stock: 28,
     price: 1.01,
     libraryType: 'extended',
+    pcbaType: 'economic-and-standard',
     ...overrides,
   };
 }
@@ -35,8 +37,8 @@ describe('list-view-format', () => {
     const extendedRow = formatListRow(createResult({ libraryType: 'extended' }), widths);
     const basicRow = formatListRow(createResult({ libraryType: 'basic' }), widths);
 
-    const render = (row: ReturnType<typeof formatListRow>) =>
-      '  ' + row.mfrPart + row.desc + row.pkg + row.stock + row.price + '  ' + row.library;
+    const render = (row: ListViewRow) =>
+      '  ' + row.mfrPart + row.desc + row.pkg + row.stock + row.price + '  ' + row.library + row.pcba;
 
     expect(measureTextWidth(header)).toBe(measureTextWidth(render(extendedRow)));
     expect(measureTextWidth(render(extendedRow))).toBe(
@@ -44,6 +46,25 @@ describe('list-view-format', () => {
     );
     expect(measureTextWidth(extendedRow.library)).toBe(widths.libraryWidth);
     expect(measureTextWidth(basicRow.library)).toBe(widths.libraryWidth);
+    expect(measureTextWidth(basicRow.pcba)).toBe(widths.pcbaWidth);
+  });
+
+  it('flags Standard Only parts and stays aligned in the PCBA column', () => {
+    const widths = getListViewColumnWidths(120);
+
+    const standardOnly = formatListRow(
+      createResult({ pcbaType: 'standard-only' }),
+      widths
+    );
+    const both = formatListRow(
+      createResult({ pcbaType: 'economic-and-standard' }),
+      widths
+    );
+
+    expect(standardOnly.pcbaLabel).toBe('Std Only');
+    expect(both.pcbaLabel).toBe('Econ+Std');
+    expect(measureTextWidth(standardOnly.pcba)).toBe(widths.pcbaWidth);
+    expect(measureTextWidth(both.pcba)).toBe(widths.pcbaWidth);
   });
 
   it('truncates and pads by display width for wide characters', () => {

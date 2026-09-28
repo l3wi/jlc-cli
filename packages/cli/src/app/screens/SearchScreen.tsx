@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { createComponentService } from '@jlcpcb/core';
+import { createComponentService, type SearchOptions } from '@jlcpcb/core';
 import { useNavigation, useCurrentScreen } from '../navigation/NavigationContext.js';
 import type { SearchParams } from '../navigation/types.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
@@ -15,7 +15,24 @@ export function SearchScreen() {
 
   const { results, selectedIndex = 0 } = params;
   const isFiltered = params.searchOptions?.basicOnly ?? false;
+  const isEconomicOnly = params.searchOptions?.economicOnly ?? false;
   const [isSearching, setIsSearching] = useState(false);
+
+  const applyOptions = async (searchOptions: SearchOptions) => {
+    setIsSearching(true);
+    try {
+      let newResults = await componentService.search(params.query, searchOptions);
+      newResults = newResults.sort((a, b) => {
+        if (a.libraryType === 'basic' && b.libraryType !== 'basic') return -1;
+        if (a.libraryType !== 'basic' && b.libraryType === 'basic') return 1;
+        return 0;
+      });
+      replace('search', { ...params, results: newResults, searchOptions, selectedIndex: 0 });
+    } catch {
+      // Keep existing results on error
+    }
+    setIsSearching(false);
+  };
 
   useInput(async (input, key) => {
     if (isSearching) return;
@@ -39,21 +56,10 @@ export function SearchScreen() {
         });
       }
     } else if (key.tab) {
-      setIsSearching(true);
-      const newFiltered = !isFiltered;
-      try {
-        const searchOptions = { ...params.searchOptions, basicOnly: newFiltered };
-        let newResults = await componentService.search(params.query, searchOptions);
-        newResults = newResults.sort((a, b) => {
-          if (a.libraryType === 'basic' && b.libraryType !== 'basic') return -1;
-          if (a.libraryType !== 'basic' && b.libraryType === 'basic') return 1;
-          return 0;
-        });
-        replace('search', { ...params, results: newResults, searchOptions, selectedIndex: 0 });
-      } catch {
-        // Keep existing results on error
-      }
-      setIsSearching(false);
+      await applyOptions({ ...params.searchOptions, basicOnly: !isFiltered });
+    } else if (input === 'e') {
+      // Filter out parts that would force the pricier Standard PCBA service
+      await applyOptions({ ...params.searchOptions, economicOnly: !isEconomicOnly });
     }
   });
 
@@ -63,7 +69,10 @@ export function SearchScreen() {
         <Text bold>
           Search: <Text color="cyan">{params.query}</Text>
           {' '}
-          <Text dimColor>({results.length} results{isFiltered ? ' - Basic/Preferred only' : ''})</Text>
+          <Text dimColor>
+            ({results.length} results{isFiltered ? ' - Basic/Preferred only' : ''}
+            {isEconomicOnly ? ' - Economic PCBA only' : ''})
+          </Text>
           {isSearching && <Text color="yellow"> ⏳</Text>}
         </Text>
       </Box>
@@ -71,6 +80,7 @@ export function SearchScreen() {
         results={results}
         selectedIndex={selectedIndex}
         isFiltered={isFiltered}
+        isEconomicOnly={isEconomicOnly}
         terminalWidth={terminalWidth}
       />
     </Box>

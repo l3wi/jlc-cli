@@ -6,49 +6,24 @@
 
 import { z } from 'zod';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
-import { homedir } from 'os';
 import {
   easyedaClient,
   symbolConverter,
   footprintConverter,
   getLibraryCategory,
   getLibraryFilename,
-  getFootprintDirName,
-  getFootprintReference as getCategoryFootprintRef,
+  parseLibraryName,
+  getLibraryPaths,
+  getCategoryFootprintReference,
   ensureDir,
   writeText,
-  detectKicadVersion,
   type EasyEDAPin,
 } from '@jlcpcb/core';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { toolError } from '../tool-response.js';
+import { findJlcLibraries, readLibrarySymbols, regenerateInstalledSymbol, type LibrarySymbol } from './library-symbols.js';
 
-/**
- * Get library paths for fix operation
- */
-function getLibraryPaths(projectPath?: string): {
-  symbolsDir: string;
-  footprintDir: string;
-} {
-  if (projectPath) {
-    const librariesDir = join(projectPath, 'libraries');
-    return {
-      symbolsDir: join(librariesDir, 'symbols'),
-      footprintDir: join(librariesDir, 'footprints', getFootprintDirName()),
-    };
-  }
-
-  const home = homedir();
-  const version = detectKicadVersion();
-  const base = join(home, 'Documents', 'KiCad', version);
-
-  return {
-    symbolsDir: join(base, 'symbols'),
-    footprintDir: join(base, 'footprints', getFootprintDirName()),
-  };
-}
 
 // Pin electrical types enum for validation
 const PinElectricalType = z.enum([
@@ -219,30 +194,38 @@ export async function handleFixLibrary(args: unknown) {
     });
   }
 
-  // Determine category and symbol file path
-  const category = getLibraryCategory(
+  // Installed identity, not mutable upstream naming/category, determines the target.
+  const libraries = new Map<string, { content: string; symbols: LibrarySymbol[] }>();
+  let installed: { file: string; symbol: LibrarySymbol } | undefined;
+  for (const file of findJlcLibraries(paths.symbolsDir)) {
+    const content = await readFile(file, 'utf-8');
+    const symbols = readLibrarySymbols(content);
+    libraries.set(file, { content, symbols });
+    if (!installed) {
+      const symbol = symbols.find(entry => entry.lcscId === params.lcsc_id);
+      if (symbol) installed = { file, symbol };
+    }
+  }
+  const upstreamCategory = getLibraryCategory(
     component.info.prefix,
     component.info.category,
     component.info.description
   );
-  const symbolLibraryFilename = getLibraryFilename(category);
-  const symbolFile = join(paths.symbolsDir, symbolLibraryFilename);
-
-  // Check if symbol library exists
-  if (!existsSync(symbolFile) && !params.force) {
-    return toolError('symbol_library_missing', `Symbol library ${symbolLibraryFilename} does not exist. Use library_install first, or set force=true.`, {
-      details: { lcsc_id: params.lcsc_id, expected_library: symbolFile },
-    });
-  }
-
-  // Check if symbol exists in library (unless force)
-  if (existsSync(symbolFile) && !params.force) {
-    const existingContent = await readFile(symbolFile, 'utf-8');
-    if (!symbolConverter.symbolExistsInLibrary(existingContent, component.info.name)) {
-      return toolError('symbol_missing', `Symbol "${component.info.name}" not found in ${symbolLibraryFilename}. Use library_install first, or set force=true.`, {
-        details: { lcsc_id: params.lcsc_id, symbol_name: component.info.name },
+  const category = installed
+    ? parseLibraryName(basename(installed.file, '.kicad_sym')) ?? upstreamCategory
+    : upstreamCategory;
+  const symbolFile = installed?.file ?? join(paths.symbolsDir, getLibraryFilename(category));
+  if (!installed && !params.force) {
+    return toolError(libraries.has(symbolFile) ? 'symbol_missing' : 'symbol_library_missing',
+      `Component ${params.lcsc_id} is not installed in the selected libraries. Use library_install first, or set force=true.`, {
+        details: { lcsc_id: params.lcsc_id, expected_library: symbolFile },
       });
-    }
+  }
+  const targetLibrary = libraries.get(symbolFile);
+  if (!installed && targetLibrary?.symbols.some(symbol => symbol.name === symbolConverter.getSymbolName(component))) {
+    return toolError('symbol_name_conflict', 'Another installed component already uses the upstream symbol name.', {
+      details: { lcsc_id: params.lcsc_id, symbol_name: symbolConverter.getSymbolName(component), symbol_library: symbolFile },
+    });
   }
 
   // 2. Apply corrections to component.symbol.pins
@@ -319,8 +302,8 @@ export async function handleFixLibrary(args: unknown) {
   if (footprintResult.type === 'reference') {
     footprintRef = footprintResult.reference!;
   } else {
-    const footprintName = footprintResult.name + '_' + params.lcsc_id;
-    footprintRef = getCategoryFootprintRef(footprintName);
+    const footprintName = footprintResult.name;
+    footprintRef = getCategoryFootprintReference(footprintName);
 
     // Write custom footprint if needed
     await ensureDir(paths.footprintDir);
@@ -333,24 +316,28 @@ export async function handleFixLibrary(args: unknown) {
   // 3. Regenerate symbol with corrections
   await ensureDir(paths.symbolsDir);
 
-  let symbolContent: string;
-  let symbolAction: 'replaced' | 'created';
-
-  if (existsSync(symbolFile)) {
-    // Read existing library and replace the symbol
-    const existingContent = await readFile(symbolFile, 'utf-8');
-    symbolContent = symbolConverter.replaceInLibrary(existingContent, component);
-    symbolAction = 'replaced';
+  const symbolAction = installed ? 'replaced' : 'created';
+  const symbolName = installed?.symbol.name ?? symbolConverter.getSymbolName(component);
+  if (installed) {
+    // Refresh every existing copy by ID, retaining each file and exact top-level name.
+    for (const [file, library] of libraries) {
+      const matches = library.symbols.filter(symbol => symbol.lcscId === params.lcsc_id);
+      if (matches.length === 0) continue;
+      const parts: string[] = [];
+      let offset = 0;
+      for (const symbol of matches) {
+        parts.push(library.content.slice(offset, symbol.start), regenerateInstalledSymbol(component, symbol));
+        offset = symbol.end;
+      }
+      parts.push(library.content.slice(offset));
+      await writeText(file, parts.join(''));
+    }
   } else {
-    // Create new library with this symbol (only if force=true)
-    symbolContent = symbolConverter.convert(component);
-    symbolAction = 'created';
+    const symbolContent = targetLibrary
+      ? symbolConverter.appendToLibrary(targetLibrary.content, component)
+      : symbolConverter.convert(component);
+    await writeText(symbolFile, symbolContent);
   }
-
-  // 4. Write updated library
-  await writeText(symbolFile, symbolContent);
-
-  const symbolName = symbolConverter.getSymbolName(component);
 
   return {
     content: [{

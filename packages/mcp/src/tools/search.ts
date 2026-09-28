@@ -20,7 +20,7 @@ Sources:
 Returns full component details for selection including:
 - LCSC ID, manufacturer part number, manufacturer name
 - Description, package, datasheet URL
-- Price, stock, library type (basic/extended)
+- Price, stock, library type (basic/extended), PCBA type (economic-and-standard/standard-only)
 - Key attributes (resistance, voltage, etc.)`,
   inputSchema: {
     type: 'object',
@@ -46,6 +46,11 @@ Returns full component details for selection including:
         type: 'boolean',
         description: 'Only show JLCPCB Basic Parts Library components (lower assembly cost, LCSC only)',
       },
+      economic_only: {
+        type: 'boolean',
+        description:
+          'Only show parts supported by the Economic PCBA service (excludes "Standard Only" parts, which require the pricier Standard PCBA service; LCSC only)',
+      },
     },
     required: ['query'],
   },
@@ -57,6 +62,7 @@ export const SearchParamsSchema = z.object({
   limit: z.number().min(1).max(50).default(10),
   in_stock: z.boolean().optional(),
   basic_only: z.boolean().optional(),
+  economic_only: z.boolean().optional(),
 });
 
 export async function handleComponentSearch(args: unknown) {
@@ -67,6 +73,7 @@ export async function handleComponentSearch(args: unknown) {
     limit: params.limit,
     inStock: params.in_stock,
     basicOnly: params.basic_only,
+    economicOnly: params.economic_only,
   });
 
   if (results.length === 0) {
@@ -101,6 +108,7 @@ export async function handleComponentSearch(args: unknown) {
     stock: r.stock,
     price: r.price,
     library_type: r.libraryType,
+    pcba_type: r.pcbaType,
     category: r.category,
     attributes: r.attributes,
   }));

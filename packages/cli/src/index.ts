@@ -39,6 +39,10 @@ program
   .option('-l, --limit <number>', 'Maximum results', parsePositiveInt, 20)
   .option('--in-stock', 'Only show in-stock components')
   .option('--basic-only', 'Only show basic parts (no extended)')
+  .option(
+    '--economic-only',
+    'Only show parts usable with Economic PCBA (Standard Only parts need the pricier Standard PCBA service)'
+  )
   .option('--community', 'Search EasyEDA community library')
   .option('--json', 'Output clean JSON and do not launch the TUI')
   .action(async (queryParts: string[], options) => {
@@ -47,6 +51,7 @@ program
       limit: options.limit,
       inStock: options.inStock,
       basicOnly: options.basicOnly || false,
+      economicOnly: options.economicOnly || false,
       source: options.community ? 'easyeda-community' : 'lcsc',
       json: options.json,
     });

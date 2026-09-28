@@ -1,5 +1,21 @@
 # @jlcpcb/mcp
 
+## 0.5.0
+
+### Minor Changes
+
+- Add PCBA service compatibility to `component_search`: results carry `pcba_type` and `economic_only` excludes parts JLC marks "Standard Only" (which require the pricier Standard PCBA service).
+
+### Patch Changes
+
+- Use corrected footprint conversion for custom copper, slots, NPTH pads, courtyards, and SVG regions; reject ambiguous geometry instead of silently changing manufacturing features.
+- Restrict standard-footprint substitution to compatible unpolarized two-terminal passive packages.
+
+- Refresh installed symbols without deleting failed or unrelated entries, preserve installed identities, and retain qualified footprint references.
+- Resolve corrections by installed LCSC identity and use the same global/project paths as installation.
+- Propagate library scan errors instead of initializing over existing files; replace refreshed library files atomically.
+- Accept omitted arguments for parameterless tools and shut down the HTTP listener when the stdio client disconnects.
+
 ## 0.4.0
 
 ### Minor Changes

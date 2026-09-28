@@ -17,7 +17,7 @@ Search JLCPCB's parts database, fetch components as KiCad-compatible symbols and
 - Search JLCPCB parts database with stock levels and pricing
 - Fetch components directly to KiCad-compatible symbol/footprint format
 - Category-based library organization (Resistors, Capacitors, ICs, etc.)
-- Hybrid footprint strategy: standard packages use KiCad built-ins, custom packages are generated
+- Hybrid footprint strategy: compatible unpolarized two-terminal R/C/L packages use nominal KiCad built-ins; other packages are generated from source geometry
 - EasyEDA community library support for modules and breakouts
 - 3D model downloads (STEP/OBJ formats)
 
@@ -76,7 +76,7 @@ bun run build
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `component_search` | Search JLCPCB parts or EasyEDA community | `query`, `source`, `in_stock`, `basic_only`, `limit` |
+| `component_search` | Search JLCPCB parts or EasyEDA community | `query`, `source`, `in_stock`, `basic_only`, `economic_only`, `limit` |
 
 ### Library Management
 
@@ -86,7 +86,7 @@ bun run build
 | `library_batch_install` | Install up to 10 components at once | `ids`, `include_3d`?, `force`? |
 | `library_get_component` | Get installed component metadata | `id` (LCSC ID) |
 | `library_update` | Regenerate all components with latest data | `project_path`?, `dry_run`? |
-| `library_fix` | Apply pin corrections to a component | `id`, `corrections` |
+| `library_fix` | Apply pin corrections to a component | `lcsc_id`, `corrections`, `project_path`?, `force`? |
 
 ## Usage Examples
 
@@ -96,7 +96,9 @@ bun run build
 component_search(query="STM32F103", in_stock=true, basic_only=true)
 ```
 
-Returns matching components with LCSC IDs, stock levels, and pricing.
+Returns matching components with LCSC IDs, stock levels, and pricing. Results include `library_type`
+(basic/extended) and `pcba_type`: `standard-only` parts cannot be assembled with the cheaper Economic PCBA
+service, so they force the pricier Standard PCBA order.
 
 ### Install a component
 
@@ -106,7 +108,9 @@ library_install(id="C8734")
 
 Downloads the component and returns:
 - `symbol_ref`: Reference for schematic (e.g., `JLC-MCP-ICs:STM32F103C8T6`)
-- `footprint_ref`: Reference for PCB (e.g., `Package_QFP:LQFP-48_7x7mm_P0.5mm`)
+- `footprint_ref`: A KiCad standard passive reference or a generated `JLC-MCP:...` reference for PCB placement
+
+Generated footprints preserve custom copper boundaries, plated/non-plated holes, and explicit slot geometry. Ambiguous drills and unsupported cutout semantics return conversion errors rather than guessed geometry. Existing footprints are not rewritten automatically; explicitly regenerate them to apply converter corrections. See the [core conversion policy](../core/README.md#footprintconverter) for fidelity limits.
 
 ### Install to project-local library
 
@@ -132,6 +136,12 @@ Creates the category-based library structure if it doesn't exist:
 - Creates `JLC-MCP-Resistors.kicad_sym`, `JLC-MCP-Capacitors.kicad_sym`, etc.
 - Creates `JLC-MCP.pretty/` footprint directory
 - Creates `JLC-MCP.3dshapes/` 3D model directory
+
+For existing libraries, only successfully refreshed symbols are replaced. Failed components and unrelated entries remain installed, and existing symbol names and library locations are retained. Directory scan errors stop the operation rather than triggering initialization. `dry_run=true` reports planned changes without writing files.
+
+`library_fix` locates the installed component by its LCSC property, including when upstream names or categories have changed. Both maintenance tools use the same global and project-local paths as installation.
+
+The parameterless `library_update` call accepts omitted MCP `arguments` as well as an empty object. Closing the MCP client's input stream shuts down the server and its companion HTTP listener.
 
 ## Library Organization
 

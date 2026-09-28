@@ -12,6 +12,7 @@ interface ListViewProps {
   results: ComponentSearchResult[];
   selectedIndex: number;
   isFiltered: boolean;
+  isEconomicOnly: boolean;
   terminalWidth: number;
 }
 
@@ -19,6 +20,7 @@ export function ListView({
   results,
   selectedIndex,
   isFiltered,
+  isEconomicOnly,
   terminalWidth,
 }: ListViewProps) {
   const widths = getListViewColumnWidths(terminalWidth);
@@ -44,6 +46,7 @@ export function ListView({
                 {row.price}
                 {'  '}
                 {row.library}
+                {row.pcba}
               </Text>
             ) : (
               <Text>
@@ -54,6 +57,9 @@ export function ListView({
                 {row.price}
                 {'  '}
                 <Text color={row.libraryColor}>{row.library}</Text>
+                <Text color={row.pcbaColor} dimColor={!row.pcbaColor}>
+                  {row.pcba}
+                </Text>
               </Text>
             )}
           </Box>
@@ -63,7 +69,8 @@ export function ListView({
         <Divider width={terminalWidth} />
         <Box paddingY={0}>
           <Text dimColor>
-            ↑/↓ Navigate • Enter View • Tab {isFiltered ? 'All Parts' : 'Basic Only'} • Esc Back
+            ↑/↓ Navigate • Enter View • Tab {isFiltered ? 'All Parts' : 'Basic Only'} • e{' '}
+            {isEconomicOnly ? 'Any PCBA' : 'Economic PCBA'} • Esc Back
           </Text>
         </Box>
         <Divider width={terminalWidth} />

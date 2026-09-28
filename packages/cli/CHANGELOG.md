@@ -1,5 +1,11 @@
 # @jlcpcb/cli
 
+## 0.5.0
+
+### Minor Changes
+
+- Report JLCPCB PCBA service compatibility in search results: `pcba_type` in JSON, a `PCBA` column (`Econ+Std` / `Std Only`) and detail-view row in the TUI, `--economic-only` to exclude parts that force the pricier Standard PCBA service, and `e` to toggle that filter interactively.
+
 ## 0.4.1
 
 ### Patch Changes

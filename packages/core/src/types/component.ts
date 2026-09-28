@@ -43,6 +43,21 @@ export interface ComponentSelection {
   status: 'pending' | 'selected' | 'placed' | 'routed';
 }
 
+/** JLCPCB PCBA service compatibility (money: Standard PCBA setup costs more than Economic) */
+export type PcbaType = 'economic-and-standard' | 'standard-only';
+
+/** One page of catalogue search results, with the API's row count for the query */
+export interface ComponentSearchPage {
+  /**
+   * Rows the API reports for this query. An upper bound when `economicOnly` filters the page locally,
+   * and the count to paginate by otherwise.
+   */
+  total: number;
+  results: ComponentSearchResult[];
+  page: number;
+  pageSize: number;
+}
+
 export interface ComponentSearchResult {
   id: string;
   idType: 'lcsc' | 'easyeda_uuid';
@@ -59,6 +74,13 @@ export interface ComponentSearchResult {
   category?: string;
   /** JLCPCB assembly type: "basic" = no setup fee, "extended" = setup fee required */
   libraryType?: 'basic' | 'extended';
+  /**
+   * JLCPCB PCBA service compatibility.
+   * "standard-only" parts cannot be assembled with the cheaper Economic PCBA service
+   * (JLCPCB source: PCBA Type "Standard Only"); "economic-and-standard" works with both.
+   * undefined = not reported by the API.
+   */
+  pcbaType?: PcbaType;
   /** Component specifications (e.g., "Output Voltage": "3.3V", "Output Current": "100mA") */
   attributes?: Record<string, string>;
 }

@@ -30,6 +30,7 @@ jlc search "100nF 0402"
 # Filter options
 jlc search "STM32" --limit 50
 jlc search "capacitor" --in-stock --basic-only
+jlc search "0201 resistor" --economic-only
 jlc search "XIAO RP2040" --community
 ```
 
@@ -40,13 +41,20 @@ jlc search "XIAO RP2040" --community
 | `-l, --limit <n>` | Maximum results (default: 20) |
 | `--in-stock` | Only show in-stock components |
 | `--basic-only` | Only JLCPCB basic parts (no extended fee) |
+| `--economic-only` | Only parts usable with Economic PCBA (Standard Only parts require the pricier Standard PCBA service) |
 | `--community` | Search EasyEDA community library |
+
+**PCBA type:** JLC marks some parts "Standard Only" — they cannot be assembled with the cheaper Economic PCBA
+service. Every result carries `pcba_type` (`economic-and-standard` or `standard-only`) and the list/JSON output
+shows a `PCBA` column (`Econ+Std` / `Std Only`). JLCPCB ignores a server-side filter for this, so
+`--economic-only` over-fetches one page (50 rows) and filters locally, which can yield fewer than `--limit` rows.
 
 **Interactive Mode:**
 
 - Use `↑` `↓` to navigate results
 - Press `Enter` to view component details
 - Press `Tab` to toggle between basic/all parts
+- Press `e` to toggle the Economic-PCBA-only filter
 - Press `Esc` to exit
 
 ### `jlc info <id>`
